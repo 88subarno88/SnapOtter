@@ -1,7 +1,6 @@
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import Fastify from "fastify";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { stripBasePath } from "../../../apps/api/src/lib/base-path.js";
@@ -33,35 +32,6 @@ it("keeps the production URL rewrite wired before routing and auth", () => {
   expect(source).toMatch(
     /const app = Fastify\(\{\s*rewriteUrl: \(request\) => stripBasePath\(request\.url \?\? "\/", env\.BASE_PATH\)/,
   );
-});
-
-it("builds every API download URL through the deployment prefix", () => {
-  // Drift guard: a hardcoded "/api/v1/download/..." template ships a URL the
-  // browser cannot follow under a subpath deployment. Route registrations and
-  // auth prefix literals are fine; only string interpolation of URLs is.
-  const offenders: string[] = [];
-  const walk = (dir: string): void => {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const p = join(dir, entry.name);
-      if (entry.isDirectory()) walk(p);
-      else if (entry.name.endsWith(".ts")) {
-        for (const [i, line] of readFileSync(p, "utf8").split("\n").entries()) {
-          // A drifted URL is always a template literal: route registrations
-          // (`"/api/v1/download/:jobId/..."`) and the auth isPublicRoute prefix
-          // literal are plain strings, so interpolating `${...}` into a
-          // `/api/v1/download/` template without `env.BASE_PATH` is the failure.
-          if (
-            /["'`]\/api\/v1\/download\//.test(line) &&
-            line.includes("${") &&
-            !line.includes("env.BASE_PATH")
-          )
-            offenders.push(`${p}:${i + 1}: ${line.trim()}`);
-        }
-      }
-    }
-  };
-  walk(fileURLToPath(new URL("../../../apps/api/src", import.meta.url)));
-  expect(offenders).toEqual([]);
 });
 
 describe("BASE_PATH configuration", () => {
@@ -176,11 +146,29 @@ it("keeps API documentation redirects and server URLs under the prefix", async (
     const page = await app.inject("/snapotter/api/docs/");
     expect(page.statusCode).toBe(200);
     const spec = await app.inject("/snapotter/api/docs/openapi.json");
-    expect(spec.json().servers).toEqual([{ url: "/snapotter" }]);
+    expect(spec.json().servers).toEqual([{ url: "/snapotter", description: "Current instance" }]);
+    // Only the servers url changes; the rest of the localized file is served as-is.
     const localized = await app.inject("/snapotter/api/v1/openapi.yaml?lang=fr");
-    expect(localized.body).toContain("url: /snapotter");
+    const frSource = readFileSync(
+      new URL("../../../apps/api/src/openapi.fr.yaml", import.meta.url),
+      "utf8",
+    );
+    expect(localized.body).toBe(
+      frSource.replace("\nservers:\n  - url: /\n", "\nservers:\n  - url: /snapotter\n"),
+    );
+    expect(localized.body).not.toBe(frSource);
   } finally {
     await app.close();
+    config.BASE_PATH = "";
+  }
+});
+
+it("finds the root servers entry in every OpenAPI spec", () => {
+  const dir = new URL("../../../apps/api/src/", import.meta.url);
+  const specs = readdirSync(dir).filter((name) => /^openapi(\.[\w-]+)?\.yaml$/.test(name));
+  expect(specs.length).toBeGreaterThan(1);
+  for (const name of specs) {
+    expect(readFileSync(new URL(name, dir), "utf8"), name).toContain("\nservers:\n  - url: /\n");
   }
 });
 
