@@ -17,6 +17,7 @@ import { eq } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { env } from "../config.js";
 import { db, schema } from "../db/index.js";
+import { reportError } from "../lib/error-report.js";
 import { friendlyError } from "../lib/errors.js";
 import { getStoredFilePath } from "../lib/file-storage.js";
 import { hasEffectivePermission, requirePermission } from "../permissions.js";
@@ -66,6 +67,16 @@ function previewErrorMessage(err: unknown): string {
   return isSafeMessageError(err) && err.code === "ENCODER_MISSING"
     ? friendlyError(err.message)
     : "Could not generate preview";
+}
+
+/** Best-effort removal of an unfinished preview; logged, since nothing else clears it. */
+async function removePartialPreview(
+  path: string,
+  log: { warn: (obj: object, msg: string) => void },
+): Promise<void> {
+  await rm(path, { force: true }).catch((err) => {
+    log.warn({ err, path }, "Could not remove partial preview");
+  });
 }
 
 async function fileExists(path: string): Promise<boolean> {
@@ -196,9 +207,14 @@ export async function filePreviewRoutes(app: FastifyInstance): Promise<void> {
           .send(createReadStream(cachedPath));
       }
 
-      // Generate preview via FFmpeg
+      // Generate preview via FFmpeg. It encodes into a temp file that is only
+      // renamed into the cache once it finishes: written straight to
+      // cachedPath, a run that died partway left a truncated file there, and
+      // every later request served it as `immutable` (#1291). The temp name
+      // ends in the real extension because ffmpeg picks the container from it.
       await ensurePreviewDir();
       const inputPath = getStoredFilePath(file.storedName);
+      const partialPath = resolveWithinPreviewDir(`${id}.${randomUUID()}.part${previewExt}`);
 
       try {
         if (isVideo) {
@@ -222,7 +238,7 @@ export async function filePreviewRoutes(app: FastifyInstance): Promise<void> {
             "-movflags",
             "+faststart",
             "-y",
-            cachedPath,
+            partialPath,
           ]);
         } else {
           await runFfmpeg([
@@ -235,12 +251,30 @@ export async function filePreviewRoutes(app: FastifyInstance): Promise<void> {
             "-b:a",
             "128k",
             "-y",
-            cachedPath,
+            partialPath,
           ]);
         }
       } catch (err) {
+        await removePartialPreview(partialPath, request.log);
         request.log.error({ err, fileId: id }, "Preview generation failed");
         return reply.status(422).send({ error: previewErrorMessage(err) });
+      }
+
+      // Same directory, so the rename is atomic: a concurrent request sees
+      // either no cache file or a complete one. A failure here is the server's
+      // (a read-only or full preview dir), not the file's, so it is a 500.
+      try {
+        await rename(partialPath, cachedPath);
+      } catch (err) {
+        await removePartialPreview(partialPath, request.log);
+        request.log.error({ err, fileId: id, cachedPath }, "Preview cache write failed");
+        void reportError(err, {
+          source: "http",
+          route: "/api/v1/files/:id/preview",
+          method: "GET",
+          statusCode: 500,
+        });
+        return reply.status(500).send({ error: "Could not store preview" });
       }
 
       return reply
