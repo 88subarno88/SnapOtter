@@ -1,3 +1,4 @@
+import { SafeError } from "@snapotter/shared";
 import { Play, RefreshCw, Video, Volume2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "@/contexts/i18n-context";
@@ -85,6 +86,15 @@ export function NonNativePreview({
       let fileToUpload = file;
       if (!fileToUpload && src) {
         const res = await fetch(src);
+        // An expired or missing result answers with an error page; don't send
+        // that body off to be transcoded as the user's media (#1286). No
+        // statusCode on purpose: a status here is about fetching the source,
+        // not about the preview request, and must not be read as one.
+        if (!res.ok) {
+          throw new SafeError(`Media preview could not fetch its source (HTTP ${res.status})`, {
+            code: `preview-source-http-${res.status}`,
+          });
+        }
         const blob = await res.blob();
         fileToUpload = new File([blob], filename, { type: blob.type });
       }
