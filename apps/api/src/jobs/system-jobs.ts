@@ -10,7 +10,7 @@
  * calling runSystemJob); anything else is a bug.
  */
 import type { Job } from "bullmq";
-import { and, eq, inArray, isNotNull, lt, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, lt, ne, sql } from "drizzle-orm";
 import { env } from "../config.js";
 import { db, schema } from "../db/index.js";
 import { analyticsEnabled } from "../lib/analytics-gate.js";
@@ -234,6 +234,25 @@ export function decideExpiry(
   return ageMs < cutoffMs ? "expired" : "keep";
 }
 
+/**
+ * The job rows whose liveness keeps a storage dir: the dir's own job, plus the
+ * pipeline or batch it belongs to. Pipeline steps are `<pipelineId>-s<i>` and
+ * the next step reads a finished step's output, so the pipeline row is what
+ * says it is still needed. Batch children and per-file pipeline flows are
+ * `<parentId>-f<i>`, per-file steps `<parentId>-f<i>-s<j>`.
+ */
+export function owningJobIds(dirJobId: string): string[] {
+  const ids = new Set([
+    dirJobId,
+    dirJobId.replace(/-s\d+$/, ""),
+    dirJobId.replace(/-f\d+(?:-s\d+)?$/, ""),
+  ]);
+  return [...ids];
+}
+
+const IN_FLIGHT_STATUSES = ["queued", "processing"] as const;
+const FINISHED_STATUSES = ["completed", "failed", "canceled"] as const;
+
 async function storageTtlSweep(): Promise<{ removed: number; failed: number }> {
   // Build set of user IDs under legal hold (direct or via team) once per sweep
   const heldUserRows = await db
@@ -260,13 +279,21 @@ async function storageTtlSweep(): Promise<{ removed: number; failed: number }> {
   }
 
   // --- Per-job deleteAfter sweep (team retention overrides) ---
-  // Runs regardless of the global TTL; deleteAfter is an absolute deadline.
+  // Runs regardless of the global TTL; deleteAfter is an absolute deadline,
+  // but only for a finished job: one still queued or running needs its input
+  // (#1412), and the next sweep after it finishes honors the deadline.
   let deleteAfterCleaned = 0;
   try {
     const expiredJobs = await db
       .select({ id: schema.jobs.id, userId: schema.jobs.userId })
       .from(schema.jobs)
-      .where(and(isNotNull(schema.jobs.deleteAfter), lt(schema.jobs.deleteAfter, new Date())));
+      .where(
+        and(
+          isNotNull(schema.jobs.deleteAfter),
+          lt(schema.jobs.deleteAfter, new Date()),
+          inArray(schema.jobs.status, [...FINISHED_STATUSES]),
+        ),
+      );
 
     for (const job of expiredJobs) {
       // Skip jobs belonging to users under legal hold
@@ -329,22 +356,49 @@ async function storageTtlSweep(): Promise<{ removed: number; failed: number }> {
     }
   }
 
-  let removed = 0;
-  const errors: string[] = [];
-  for (const dir of allDirs) {
-    if (decideExpiry(dir, cutoffMs, rowsById) === "expired") {
-      // Skip deletion if the job's user is under legal hold
-      const jobId = dir.key.split("/")[1];
-      const userId = jobUserMap.get(jobId);
-      if (userId && heldUserIds.has(userId)) continue;
+  const expiredDirs = allDirs.filter((dir) => decideExpiry(dir, cutoffMs, rowsById) === "expired");
 
-      try {
-        await deletePrefix(dir.key);
-        removed++;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        errors.push(`${dir.key}: ${message}`);
-      }
+  // Age alone would delete the input of a job still waiting behind a backed-up
+  // queue, so an expired dir survives while any job that owns it is in flight
+  // (#1412). Only rows job-reconciliation settles count (same criteria as its
+  // candidate query): a stranded one goes terminal within a minute, so a stuck
+  // row cannot pin a dir forever. Selected by status, not by an id list, so a
+  // huge backlog of expired dirs cannot overflow the bind-parameter limit.
+  const inFlightIds = new Set<string>();
+  if (expiredDirs.length > 0) {
+    const rows = await db
+      .select({ id: schema.jobs.id })
+      .from(schema.jobs)
+      .where(
+        and(
+          inArray(schema.jobs.status, [...IN_FLIGHT_STATUSES]),
+          isNotNull(schema.jobs.toolId),
+          ne(schema.jobs.toolId, ""),
+          ne(schema.jobs.type, "system"),
+        ),
+      );
+    for (const r of rows) inFlightIds.add(r.id);
+  }
+
+  let removed = 0;
+  let kept = 0;
+  const errors: string[] = [];
+  for (const dir of expiredDirs) {
+    const jobId = dir.key.split("/")[1];
+    if (owningJobIds(jobId).some((id) => inFlightIds.has(id))) {
+      kept++;
+      continue;
+    }
+    // Skip deletion if the job's user is under legal hold
+    const userId = jobUserMap.get(jobId);
+    if (userId && heldUserIds.has(userId)) continue;
+
+    try {
+      await deletePrefix(dir.key);
+      removed++;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      errors.push(`${dir.key}: ${message}`);
     }
   }
   if (errors.length > 0) {
@@ -352,6 +406,9 @@ async function storageTtlSweep(): Promise<{ removed: number; failed: number }> {
   }
   if (removed > 0) {
     console.log(`Storage TTL: removed ${removed} expired job dirs`);
+  }
+  if (kept > 0) {
+    console.log(`Storage TTL: kept ${kept} expired job dirs whose jobs are still in flight`);
   }
   return { removed: removed + deleteAfterCleaned, failed: errors.length };
 }
