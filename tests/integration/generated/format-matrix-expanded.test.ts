@@ -35,7 +35,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fixtureDir, fixtures } from "../../fixtures/index.js";
-import { featureUnavailableDisposition } from "../../helpers/generated-case-accounting.js";
+import {
+  featureUnavailableDisposition,
+  isEngineUnavailableResponse,
+} from "../../helpers/generated-case-accounting.js";
 import { settleAsyncFallback } from "../settle-job.js";
 import {
   buildTestApp,
@@ -1288,7 +1291,7 @@ describe("Collage cross-format", () => {
 
     it(
       `${fmt.name} + PNG collage: no crash`,
-      async () => {
+      async (context) => {
         const fixturePath = join(fixtureDir.formats, fmt.file);
         if (!existsSync(fixturePath) || !existsSync(PNG_PATH)) return;
 
@@ -1328,6 +1331,10 @@ describe("Collage cross-format", () => {
           body: payload,
         });
 
+        // A host without this format's decoder answers 503 ENGINE_UNAVAILABLE (#795).
+        if (res.statusCode === 503 && isEngineUnavailableResponse(res.statusCode, res.body)) {
+          return context.skip(`${fmt.name}: this host has no decoder for it`);
+        }
         expect(res.statusCode).not.toBe(500);
         expect([200, 202, 400, 422]).toContain(res.statusCode);
       },

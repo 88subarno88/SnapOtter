@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import sharp from "sharp";
+import { asDecoderUnavailable, noDecoderFound } from "./format-decoders.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -80,6 +81,7 @@ let cachedDecodeCmd: string | null = null;
 async function findDecodeCmd(options: HeicDecodeOptions = {}): Promise<string> {
   options.signal?.throwIfAborted();
   if (cachedDecodeCmd) return cachedDecodeCmd;
+  const probeFailures: unknown[] = [];
   for (const cmd of ["heif-convert", "heif-dec"]) {
     try {
       await execFileAsync(cmd, ["--version"], {
@@ -88,12 +90,15 @@ async function findDecodeCmd(options: HeicDecodeOptions = {}): Promise<string> {
       });
       cachedDecodeCmd = cmd;
       return cmd;
-    } catch {
+    } catch (err) {
       options.signal?.throwIfAborted();
-      // try next
+      probeFailures.push(err);
     }
   }
-  throw new Error("No HEIF decoder found. Install libheif-examples (Linux) or libheif (macOS).");
+  throw noDecoderFound(
+    "No HEIF decoder found. Install libheif-examples (Linux) or libheif (macOS).",
+    probeFailures,
+  );
 }
 
 /**
@@ -155,6 +160,8 @@ export async function decodeHeic(buffer: Buffer, options: HeicDecodeOptions = {}
     await execFileAsync(cmd, [inputPath, outputPath], {
       timeout: 120_000,
       signal: options.signal,
+    }).catch((err: unknown) => {
+      throw asDecoderUnavailable(err);
     });
     options.signal?.throwIfAborted();
 

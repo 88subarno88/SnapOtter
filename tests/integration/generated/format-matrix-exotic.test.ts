@@ -22,6 +22,7 @@ import { apiToolPath } from "@snapotter/shared";
 import sharp from "sharp";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fixtureDir, fixtures } from "../../fixtures/index.js";
+import { isEngineUnavailableResponse } from "../../helpers/generated-case-accounting.js";
 import {
   buildTestApp,
   createMultipartPayload,
@@ -1311,7 +1312,7 @@ describe("Exotic formats with multi-file tools", () => {
   }
 
   for (const fmt of EXOTIC_FORMATS) {
-    it(`collage: ${fmt.name} + PNG in 2-image layout`, async () => {
+    it(`collage: ${fmt.name} + PNG in 2-image layout`, async (context) => {
       const fixturePath = join(fixtureDir.formats, fmt.file);
       if (!existsSync(fixturePath) || !existsSync(PNG_PATH)) return;
 
@@ -1334,6 +1335,10 @@ describe("Exotic formats with multi-file tools", () => {
         body: payload,
       });
 
+      // A host without this format's decoder answers 503 ENGINE_UNAVAILABLE (#795).
+      if (res.statusCode === 503 && isEngineUnavailableResponse(res.statusCode, res.body)) {
+        return context.skip(`${fmt.name}: this host has no decoder for it`);
+      }
       assertNoServerCrash(res.statusCode);
     }, 180_000);
   }
