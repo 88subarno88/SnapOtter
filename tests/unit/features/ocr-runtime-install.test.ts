@@ -185,6 +185,52 @@ describe("canonicalRuntimeJson (#667)", () => {
   });
 });
 
+describe("canonicalRuntimeJson key order (#800)", () => {
+  // Python's sort_keys orders by code point; a plain .sort() orders by UTF-16
+  // code unit. They disagree where a key char in U+D800-U+FFFF (a BMP char or
+  // a lone surrogate) sits beside an astral char, whose high surrogate sorts
+  // first by code unit but last by code point.
+  it("orders a BMP key above U+E000 before an astral key, as Python's sort_keys does", () => {
+    // Python: json.dumps({"\U00010000":2,"\uffff":1}, sort_keys=True, separators=(",",":"))
+    //   -> {"\uffff":1,"\ud800\udc00":2}
+    expect(canonicalRuntimeJson({ "\u{10000}": 2, "\uffff": 1 })).toBe(
+      '{"\\uffff":1,"\\ud800\\udc00":2}\n',
+    );
+  });
+
+  it("gives the same bytes whatever order the keys arrive in", () => {
+    const keys = ["\u{1f600}", "\ue000", "a", "\u00e9", "\u{10000}", "\uffff"];
+    const forward = Object.fromEntries(keys.map((key, i) => [key, i]));
+    const reversed = Object.fromEntries([...keys].reverse().map((key) => [key, keys.indexOf(key)]));
+    // Python: json.dumps over these keys with sort_keys=True emits them as
+    // a, \u00e9, \ue000, \uffff, \ud800\udc00, \ud83d\ude00
+    const expected =
+      '{"a":2,"\\u00e9":3,"\\ue000":1,"\\uffff":5,"\\ud800\\udc00":4,"\\ud83d\\ude00":0}\n';
+    expect(canonicalRuntimeJson(forward)).toBe(expected);
+    expect(canonicalRuntimeJson(reversed)).toBe(expected);
+  });
+
+  it("orders a key before any longer key it prefixes, in either insertion order", () => {
+    // Python: json.dumps({"ab":1,"a":2}, sort_keys=True, separators=(",",":")) -> {"a":2,"ab":1}
+    expect(canonicalRuntimeJson({ ab: 1, a: 2 })).toBe('{"a":2,"ab":1}\n');
+    expect(canonicalRuntimeJson({ a: 2, ab: 1 })).toBe('{"a":2,"ab":1}\n');
+  });
+
+  it("compares by code point past a shared prefix, not only at the first character", () => {
+    // Python: json.dumps({"x\U00010000":2,"x\uffff":1}, sort_keys=True, separators=(",",":"))
+    //   -> {"x\uffff":1,"x\ud800\udc00":2}
+    expect(canonicalRuntimeJson({ "x\u{10000}": 2, "x\uffff": 1 })).toBe(
+      '{"x\\uffff":1,"x\\ud800\\udc00":2}\n',
+    );
+  });
+
+  it("applies code-point order to nested objects and objects inside arrays", () => {
+    expect(canonicalRuntimeJson({ outer: [{ "\u{10000}": 1, "\uffff": 0 }] })).toBe(
+      '{"outer":[{"\\uffff":0,"\\ud800\\udc00":1}]}\n',
+    );
+  });
+});
+
 describe("remainingInstallerTimeoutMs", () => {
   it("floors a fractional remaining budget to the safe integer the installer requires", () => {
     // The deadline is set at one performance.now() read and the remaining time is
