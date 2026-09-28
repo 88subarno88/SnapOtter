@@ -14,6 +14,7 @@ import { decodeToSharpCompat, needsCliDecode } from "../../lib/format-decoders.j
 import { encodeJxl } from "../../lib/format-encoders.js";
 import { decodeHeic, encodeHeic } from "../../lib/heic-converter.js";
 import { containerMemoryLimitBytes, hqCpuMemoryRefusal } from "../../lib/hq-memory-gate.js";
+import { multipartFailure } from "../../lib/multipart-parts.js";
 import { getObjectBuffer, putObject } from "../../lib/object-storage.js";
 import { resolveOutputFormat } from "../../lib/output-format.js";
 import { receiveUpload } from "../../lib/upload-stream.js";
@@ -99,10 +100,8 @@ export function registerEraseObject(app: FastifyInstance) {
           }
         }
       } catch (err) {
-        return reply.status(400).send({
-          error: "Failed to parse multipart request",
-          details: stripInternalPaths(err instanceof Error ? err.message : String(err)),
-        });
+        const failure = multipartFailure(err);
+        return reply.status(failure.status).send(failure.body);
       }
 
       // Stamp the client-facing alias before any pre-enqueue work (#892): a
