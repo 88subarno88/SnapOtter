@@ -25,7 +25,13 @@ export class DecoderUnavailableError extends SafeError {
   }
 }
 
-/** Marker check rather than instanceof, per the SafeError convention in @snapotter/shared. */
+/**
+ * A missing decoder is the server's fault, not the upload's. Routes that
+ * answer a decode failure with a 4xx check this first and rethrow, so the
+ * global handler answers 503 and logs and reports it (#795, #1428). Marker
+ * check rather than instanceof, per the SafeError convention in
+ * @snapotter/shared.
+ */
 export function isDecoderUnavailable(err: unknown): boolean {
   return isSafeMessageError(err) && err.code === "ENGINE_UNAVAILABLE";
 }
@@ -263,6 +269,16 @@ async function preflightEncodedDimensions(
   } catch (error) {
     options.signal?.throwIfAborted();
     if (isImageSafetyError(error)) throw error;
+    // Without exiftool the safety limits can't be checked at all, whatever
+    // the file: that's the host, not the upload (#1428).
+    if ((error as NodeJS.ErrnoException).code === "ENOENT" && isBinarySpawnFailure(error)) {
+      throw new DecoderUnavailableError(
+        "No exiftool found. Install exiftool (libimage-exiftool-perl) to check image dimensions safely.",
+        error,
+      );
+    }
+    const unavailable = asDecoderUnavailable(error);
+    if (unavailable !== error) throw unavailable;
   } finally {
     await rm(inputPath, { force: true }).catch(() => {});
   }
@@ -426,7 +442,9 @@ export async function decodeAnyFormat(
       cmd,
       magickArgs(cmd, [inputPath, "-colorspace", "sRGB", `png:${outputPath}`], options),
       commandOptions(options, 120_000),
-    );
+    ).catch((err: unknown) => {
+      throw asDecoderUnavailable(err);
+    });
     return await assertDecodedWithinLimit(await readFile(outputPath), options);
   } finally {
     await rm(inputPath, { force: true }).catch(() => {});

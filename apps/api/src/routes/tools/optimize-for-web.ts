@@ -4,14 +4,20 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { openAnimated, readAnimationFor } from "../../lib/animated-image.js";
 import { autoOrient } from "../../lib/auto-orient.js";
+import { sendInputValidationError } from "../../lib/engine-unavailable.js";
 import { formatZodErrors } from "../../lib/errors.js";
 import { validateImageBuffer } from "../../lib/file-validation.js";
 import { sanitizeFilename } from "../../lib/filename.js";
-import { decodeToSharpCompat, needsCliDecode } from "../../lib/format-decoders.js";
+import {
+  decodeToSharpCompat,
+  isDecoderUnavailable,
+  needsCliDecode,
+} from "../../lib/format-decoders.js";
 import { encodeJxl } from "../../lib/format-encoders.js";
 import { decodeHeic } from "../../lib/heic-converter.js";
 import { multipartFailure } from "../../lib/multipart-parts.js";
 import { sanitizeSvg } from "../../lib/svg-sanitize.js";
+import { engineUnavailable } from "../../modality/image-input.js";
 import { createToolRoute } from "../tool-factory.js";
 
 const FORMAT_CONTENT_TYPES: Record<string, string> = {
@@ -108,6 +114,14 @@ export function registerOptimizeForWeb(app: FastifyInstance) {
         try {
           fileBuffer = await decodeHeic(fileBuffer);
         } catch (err) {
+          if (isDecoderUnavailable(err)) {
+            return sendInputValidationError(
+              reply,
+              engineUnavailable(err),
+              "optimize-for-web",
+              request.log,
+            );
+          }
           return reply.status(422).send({
             error: "Failed to decode HEIC file",
             details: err instanceof Error ? err.message : String(err),
@@ -120,6 +134,14 @@ export function registerOptimizeForWeb(app: FastifyInstance) {
         try {
           fileBuffer = await decodeToSharpCompat(fileBuffer, validation.format);
         } catch (err) {
+          if (isDecoderUnavailable(err)) {
+            return sendInputValidationError(
+              reply,
+              engineUnavailable(err),
+              "optimize-for-web",
+              request.log,
+            );
+          }
           return reply.status(422).send({
             error: `Failed to decode ${validation.format} file`,
             details: err instanceof Error ? err.message : String(err),
@@ -166,6 +188,14 @@ export function registerOptimizeForWeb(app: FastifyInstance) {
         reply.header("X-Output-Filename", encodeURIComponent(result.filename));
         return reply.send(result.buffer);
       } catch (err) {
+        if (isDecoderUnavailable(err)) {
+          return sendInputValidationError(
+            reply,
+            engineUnavailable(err),
+            "optimize-for-web",
+            request.log,
+          );
+        }
         const message = err instanceof Error ? err.message : "Preview processing failed";
         request.log.error({ err }, "Optimize preview failed");
         return reply.status(422).send({ error: "Preview failed", details: message });

@@ -3,11 +3,16 @@ import { extname } from "node:path";
 import { pipeline, type Readable, Transform } from "node:stream";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import sharp from "sharp";
+import { sendInputValidationError } from "../lib/engine-unavailable.js";
 import { reportError } from "../lib/error-report.js";
 import { readImageDimensions } from "../lib/exiftool.js";
 import { validateImageBuffer } from "../lib/file-validation.js";
 import { sanitizeFilename } from "../lib/filename.js";
-import { decodeToSharpCompat, needsCliDecode } from "../lib/format-decoders.js";
+import {
+  decodeToSharpCompat,
+  isDecoderUnavailable,
+  needsCliDecode,
+} from "../lib/format-decoders.js";
 import { decodeHeic } from "../lib/heic-converter.js";
 import {
   getObjectSize,
@@ -17,6 +22,7 @@ import {
   putObject,
 } from "../lib/object-storage.js";
 import { isSvgBuffer, sanitizeSvg } from "../lib/svg-sanitize.js";
+import { engineUnavailable } from "../modality/image-input.js";
 import { requireFileAccess, requirePermission } from "../permissions.js";
 
 /**
@@ -314,7 +320,15 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     if (validation.format === "heif") {
       try {
         buffer = await decodeHeic(buffer);
-      } catch {
+      } catch (err) {
+        if (isDecoderUnavailable(err)) {
+          return sendInputValidationError(
+            reply,
+            engineUnavailable(err),
+            "file-preview",
+            request.log,
+          );
+        }
         return reply.status(422).send({ error: "Failed to decode HEIC/HEIF file" });
       }
     }
@@ -323,11 +337,19 @@ export async function fileRoutes(app: FastifyInstance): Promise<void> {
     if (needsCliDecode(validation.format)) {
       try {
         buffer = await decodeToSharpCompat(buffer, validation.format);
-      } catch {
+      } catch (decodeErr) {
         // CLI decoder unavailable -- try Sharp directly as fallback for preview
         try {
           await sharp(buffer).metadata();
         } catch {
+          if (isDecoderUnavailable(decodeErr)) {
+            return sendInputValidationError(
+              reply,
+              engineUnavailable(decodeErr),
+              "file-preview",
+              request.log,
+            );
+          }
           return reply.status(422).send({
             error: `Failed to decode ${validation.format.toUpperCase()} file`,
           });
