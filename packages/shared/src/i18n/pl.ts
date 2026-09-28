@@ -5189,6 +5189,7 @@ export const pl: TranslationKeys = {
     networkError: "Błąd sieci. Sprawdź połączenie.",
     invalidCredentials: "Nieprawidłowa nazwa użytkownika lub hasło",
     connectionError: "Błąd połączenia",
+    fileTooLarge: "Ten plik przekracza limit rozmiaru przesyłania na serwerze.",
   },
   sidebar: {
     sponsor: "Wesprzyj nas",

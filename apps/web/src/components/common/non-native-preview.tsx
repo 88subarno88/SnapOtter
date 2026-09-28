@@ -2,6 +2,7 @@ import { SafeError } from "@snapotter/shared";
 import { Play, RefreshCw, Video, Volume2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "@/contexts/i18n-context";
+import { captureHandledError } from "@/lib/analytics";
 import { formatHeaders } from "@/lib/api";
 import { appUrl } from "@/lib/app-url";
 import { formatFileSize } from "@/lib/download";
@@ -32,6 +33,8 @@ export function NonNativePreview({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   // Set when the server's ffmpeg lacks the encoder this preview needs (#1290).
   const [missingEncoder, setMissingEncoder] = useState<string | null>(null);
+  // Set when the upload is over the server's size limit (#1280).
+  const [tooLarge, setTooLarge] = useState(false);
   const [messageIndex, setMessageIndex] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -52,6 +55,7 @@ export function NonNativePreview({
     abortRef.current?.abort();
     setState("idle");
     setMissingEncoder(null);
+    setTooLarge(false);
     setPreviewUrl((prev) => {
       if (prev) URL.revokeObjectURL(prev);
       return null;
@@ -113,7 +117,12 @@ export function NonNativePreview({
 
       if (!response.ok) {
         encoder = await previewFailureEncoder(response);
-        throw new Error(`Preview generation failed: ${response.status}`);
+        // The status goes in the message: Sentry's scrubber keeps a
+        // SafeError's message but drops its code.
+        throw new SafeError(`Media preview generation failed (HTTP ${response.status})`, {
+          code: `preview-http-${response.status}`,
+          statusCode: response.status,
+        });
       }
 
       const blob = await response.blob();
@@ -124,12 +133,29 @@ export function NonNativePreview({
 
       setPreviewUrl(url);
       setState("ready");
-    } catch {
+    } catch (err) {
       // Checked on the signal, not the error: an abort while the error body
       // was being read surfaces as an ordinary failure.
       if (!controller.signal.aborted) {
+        const status = err instanceof SafeError ? err.statusCode : undefined;
         setMissingEncoder(encoder);
+        setTooLarge(status === 413);
         setState("error");
+        // A 413 (over the upload limit) or 422 (ffmpeg couldn't decode it, or
+        // lacks the encoder) is about the file, and the panel says so.
+        // Anything else, whether a 5xx, an expired session, a rate limit, or a
+        // failed request, is a fault nobody would otherwise hear about (#1280).
+        if (status !== 413 && status !== 422) {
+          void captureHandledError(
+            err instanceof SafeError
+              ? err
+              : new SafeError("Media preview request failed", {
+                  code: "preview-request",
+                  cause: err,
+                }),
+            { error_class: "operational" },
+          );
+        }
       }
     } finally {
       stopMessageRotation();
@@ -204,22 +230,27 @@ export function NonNativePreview({
             <IconComponent className="h-8 w-8 text-muted-foreground" />
           </div>
           <p className="font-medium text-foreground mb-1">
-            {missingEncoder
-              ? format(t.toolPage.previewEncoderMissing, { encoder: missingEncoder })
-              : t.toolPage.previewFailed}
+            {tooLarge
+              ? t.errors.fileTooLarge
+              : missingEncoder
+                ? format(t.toolPage.previewEncoderMissing, { encoder: missingEncoder })
+                : t.toolPage.previewFailed}
           </p>
           <p className="text-sm text-muted-foreground mb-3">
             {filename}
             {fileSize != null && <> &middot; {formatFileSize(fileSize)}</>}
           </p>
-          <button
-            type="button"
-            onClick={generatePreview}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity"
-          >
-            <RefreshCw className="h-4 w-4" />
-            {t.common.retry}
-          </button>
+          {/* The same file will hit the same limit, so a retry can't help. */}
+          {!tooLarge && (
+            <button
+              type="button"
+              onClick={generatePreview}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity"
+            >
+              <RefreshCw className="h-4 w-4" />
+              {t.common.retry}
+            </button>
+          )}
         </div>
       </div>
     );

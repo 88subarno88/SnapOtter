@@ -5210,6 +5210,7 @@ export const de: TranslationKeys = {
     networkError: "Netzwerkfehler. Überprüfen Sie Ihre Verbindung.",
     invalidCredentials: "Ungültiger Benutzername oder Passwort",
     connectionError: "Verbindungsfehler",
+    fileTooLarge: "Diese Datei überschreitet die Upload-Größenbeschränkung des Servers.",
   },
   sidebar: {
     sponsor: "Uns unterstützen",

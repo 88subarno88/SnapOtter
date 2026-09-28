@@ -5172,6 +5172,7 @@ export const sv: TranslationKeys = {
     networkError: "Nätverksfel. Kontrollera din anslutning.",
     invalidCredentials: "Ogiltigt användarnamn eller lösenord",
     connectionError: "Anslutningsfel",
+    fileTooLarge: "Filen är större än serverns uppladdningsgräns.",
   },
   sidebar: {
     sponsor: "Stöd oss",
