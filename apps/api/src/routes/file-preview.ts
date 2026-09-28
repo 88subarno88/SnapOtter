@@ -6,8 +6,19 @@
  * MP3 (audio), or PDF (documents) previews and caches them on disk.
  */
 import { randomUUID } from "node:crypto";
-import { createReadStream } from "node:fs";
-import { access, copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { createReadStream, type Dirent } from "node:fs";
+import {
+  access,
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve, sep } from "node:path";
 import { convertDocument, sofficeAvailable } from "@snapotter/doc-engine";
@@ -20,20 +31,79 @@ import { db, schema } from "../db/index.js";
 import { reportError } from "../lib/error-report.js";
 import { friendlyError } from "../lib/errors.js";
 import { getStoredFilePath } from "../lib/file-storage.js";
+import { logger } from "../lib/logger.js";
 import { hasEffectivePermission, requirePermission } from "../permissions.js";
 import { requireAuth } from "../plugins/auth.js";
 
 const PREVIEW_DIR = ".previews";
-let previewDirReady = false;
+let previewDirReady: Promise<void> | undefined;
 
 function previewDirPath(): string {
   return join(env.FILES_STORAGE_PATH, PREVIEW_DIR);
 }
 
-async function ensurePreviewDir(): Promise<void> {
-  if (previewDirReady) return;
-  await mkdir(previewDirPath(), { recursive: true });
-  previewDirReady = true;
+/**
+ * How old a temp dir or `.part` file must be before the startup sweep treats it
+ * as orphaned. Replicas can share one DATA_DIR, so a fresh entry may belong to
+ * another live process; only something older than the longest preview run can
+ * be assumed dead. A limit of 0 means unlimited, so fall back to a day.
+ */
+function staleAfterMs(): number {
+  const encodeS = env.JOB_TIMEOUT_LONG_S || 86_400;
+  const convertS = env.LIBREOFFICE_TIMEOUT_S || 120;
+  return Math.max(encodeS, convertS) * 1000;
+}
+
+async function sweepOrphanedPreviewWork(dir: string): Promise<void> {
+  const cutoff = Date.now() - staleAfterMs();
+  let entries: Dirent[];
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch (err) {
+    logger.warn({ err, dir }, "Could not list preview directory for cleanup");
+    return;
+  }
+  for (const entry of entries) {
+    const isTempDir = entry.isDirectory();
+    const isPartial = entry.isFile() && entry.name.includes(".part.");
+    if (!isTempDir && !isPartial) continue;
+    const path = join(dir, entry.name);
+    try {
+      if ((await stat(path)).mtimeMs > cutoff) continue;
+      await rm(path, { recursive: isTempDir, force: true });
+    } catch (err) {
+      logger.warn({ err, path }, "Could not remove orphaned preview work");
+    }
+  }
+}
+
+/**
+ * Create the preview dir and sweep leftovers from killed runs once per process
+ * (#1320). Concurrent first requests share one promise, so none of them can
+ * sweep while another has already started writing.
+ */
+export function ensurePreviewDir(): Promise<void> {
+  previewDirReady ??= (async () => {
+    const dir = previewDirPath();
+    await mkdir(dir, { recursive: true });
+    await sweepOrphanedPreviewWork(dir);
+  })().catch((err) => {
+    previewDirReady = undefined;
+    throw err;
+  });
+  return previewDirReady;
+}
+
+/**
+ * Remove cached preview files for a deleted user file (.mp4, .mp3, .pdf).
+ */
+export async function deletePreview(fileId: string): Promise<void> {
+  for (const ext of [".mp4", ".mp3", ".pdf"]) {
+    const path = previewPath(fileId, ext);
+    await rm(path, { force: true }).catch((err) => {
+      logger.warn({ err, fileId, path }, "Could not remove cached preview");
+    });
+  }
 }
 
 /**
@@ -169,28 +239,47 @@ export async function filePreviewRoutes(app: FastifyInstance): Promise<void> {
         await ensurePreviewDir();
         const inputPath = getStoredFilePath(file.storedName);
 
-        // Copy to a temp file with the original extension so LibreOffice
-        // can detect the format correctly from the extension.
-        // Restrict to an alphanumeric extension (no path separators) -- the
-        // original filename is user-controlled and feeds a filesystem path.
+        // Convert inside a per-request temp directory inside the preview dir.
+        // Multiple concurrent requests for the same uncached document each get
+        // their own input copy and output directory, so neither overwrites the
+        // other's input or picks up a partial output (#1319). Keeping the temp
+        // directory on the preview filesystem keeps the final rename atomic.
         const origExt = file.originalName.match(/\.[a-zA-Z0-9]+$/)?.[0] ?? "";
-        const tempInput = resolveWithinPreviewDir(`${id}-input${origExt}`);
-        await copyFile(inputPath, tempInput);
+        let tempDir: string | undefined;
 
         try {
-          await convertDocument(tempInput, previewDirPath(), "pdf", {
+          tempDir = await mkdtemp(join(previewDirPath(), `${id}-`));
+          const tempInput = join(tempDir, `input${origExt}`);
+          await copyFile(inputPath, tempInput);
+
+          await convertDocument(tempInput, tempDir, "pdf", {
             timeoutMs: (env.LIBREOFFICE_TIMEOUT_S || 120) * 1000,
           });
 
-          // convertDocument outputs next to the temp file; rename to cached path
-          const producedPath = resolveWithinPreviewDir(`${id}-input.pdf`);
-          await rename(producedPath, cachedPath);
+          // convertDocument outputs next to the temp file: input.pdf
+          const producedPath = join(tempDir, "input.pdf");
+          try {
+            await rename(producedPath, cachedPath);
+          } catch (renameErr) {
+            request.log.error(
+              { err: renameErr, fileId: id, cachedPath },
+              "Document preview cache write failed",
+            );
+            void reportError(renameErr, {
+              source: "http",
+              route: "/api/v1/files/:id/preview",
+              method: "GET",
+              statusCode: 500,
+            });
+            return reply.status(500).send({ error: "Could not store preview" });
+          }
         } catch (err) {
           request.log.error({ err, fileId: id }, "Document preview generation failed");
           return reply.status(422).send({ error: "Could not generate document preview" });
         } finally {
-          // Clean up temp input copy
-          await rm(tempInput, { force: true }).catch(() => {});
+          if (tempDir) {
+            await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+          }
         }
 
         return reply
@@ -223,41 +312,47 @@ export async function filePreviewRoutes(app: FastifyInstance): Promise<void> {
 
       try {
         if (isVideo) {
-          await runFfmpeg([
-            "-i",
-            inputPath,
-            "-t",
-            "30",
-            "-vf",
-            "scale='min(720,iw)':-2",
-            "-c:v",
-            softwareEncoder("h264"),
-            "-preset",
-            "ultrafast",
-            "-crf",
-            "28",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "128k",
-            "-movflags",
-            "+faststart",
-            "-y",
-            partialPath,
-          ]);
+          await runFfmpeg(
+            [
+              "-i",
+              inputPath,
+              "-t",
+              "30",
+              "-vf",
+              "scale='min(720,iw)':-2",
+              "-c:v",
+              softwareEncoder("h264"),
+              "-preset",
+              "ultrafast",
+              "-crf",
+              "28",
+              "-c:a",
+              "aac",
+              "-b:a",
+              "128k",
+              "-movflags",
+              "+faststart",
+              "-y",
+              partialPath,
+            ],
+            { timeoutMs: env.JOB_TIMEOUT_LONG_S * 1000 },
+          );
         } else {
-          await runFfmpeg([
-            "-i",
-            inputPath,
-            "-t",
-            "60",
-            "-c:a",
-            softwareEncoder("mp3"),
-            "-b:a",
-            "128k",
-            "-y",
-            partialPath,
-          ]);
+          await runFfmpeg(
+            [
+              "-i",
+              inputPath,
+              "-t",
+              "60",
+              "-c:a",
+              softwareEncoder("mp3"),
+              "-b:a",
+              "128k",
+              "-y",
+              partialPath,
+            ],
+            { timeoutMs: env.JOB_TIMEOUT_LONG_S * 1000 },
+          );
         }
       } catch (err) {
         await removePartialPreview(partialPath, request.log);
@@ -381,41 +476,47 @@ export async function filePreviewRoutes(app: FastifyInstance): Promise<void> {
         await writeFile(inputPath, fileBuffer);
 
         if (isVideo) {
-          await runFfmpeg([
-            "-i",
-            inputPath,
-            "-t",
-            "30",
-            "-vf",
-            "scale='min(720,iw)':-2",
-            "-c:v",
-            softwareEncoder("h264"),
-            "-preset",
-            "ultrafast",
-            "-crf",
-            "28",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "128k",
-            "-movflags",
-            "+faststart",
-            "-y",
-            outputPath,
-          ]);
+          await runFfmpeg(
+            [
+              "-i",
+              inputPath,
+              "-t",
+              "30",
+              "-vf",
+              "scale='min(720,iw)':-2",
+              "-c:v",
+              softwareEncoder("h264"),
+              "-preset",
+              "ultrafast",
+              "-crf",
+              "28",
+              "-c:a",
+              "aac",
+              "-b:a",
+              "128k",
+              "-movflags",
+              "+faststart",
+              "-y",
+              outputPath,
+            ],
+            { timeoutMs: env.JOB_TIMEOUT_LONG_S * 1000 },
+          );
         } else {
-          await runFfmpeg([
-            "-i",
-            inputPath,
-            "-t",
-            "60",
-            "-c:a",
-            softwareEncoder("mp3"),
-            "-b:a",
-            "128k",
-            "-y",
-            outputPath,
-          ]);
+          await runFfmpeg(
+            [
+              "-i",
+              inputPath,
+              "-t",
+              "60",
+              "-c:a",
+              softwareEncoder("mp3"),
+              "-b:a",
+              "128k",
+              "-y",
+              outputPath,
+            ],
+            { timeoutMs: env.JOB_TIMEOUT_LONG_S * 1000 },
+          );
         }
 
         const outputBuffer = await readFile(outputPath);

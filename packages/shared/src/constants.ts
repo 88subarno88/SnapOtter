@@ -2745,3 +2745,20 @@ export const PYTHON_SIDECAR_TOOLS = [
  * however many files it has (#1303).
  */
 export const FILE_NOTES_ALL_FILES = "*";
+
+/**
+ * Allowed model identifiers for background removal.
+ * Matches packages/ai/python/remove_bg.py ALLOWED_MODELS.
+ */
+export const BG_REMOVAL_MODELS = [
+  "u2net",
+  "isnet-general-use",
+  "bria-rmbg",
+  "birefnet-general-lite",
+  "birefnet-portrait",
+  "birefnet-general",
+  "birefnet-matting",
+  "birefnet-hr-matting",
+] as const;
+
+export type BgRemovalModel = (typeof BG_REMOVAL_MODELS)[number];

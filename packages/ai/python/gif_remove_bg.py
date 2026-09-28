@@ -276,6 +276,11 @@ def main():
 
         model = settings.get("model", "u2net")
         if model not in ALLOWED_MODELS:
+            # JSON so the bridge forwards it to the server log; plain text is dropped.
+            sys.stderr.write(
+                json.dumps({"warning": f"Unknown model '{model}', falling back to 'u2net'"}) + "\n"
+            )
+            sys.stderr.flush()
             model = "u2net"
 
         emit_progress(3, "Reading frames")
