@@ -46,6 +46,7 @@ import {
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { env } from "../config.js";
 import { trackEvent } from "../lib/analytics.js";
+import { reportError } from "../lib/error-report.js";
 import {
   clearActive,
   dequeue,
@@ -79,7 +80,7 @@ import {
   verifyBundleModels,
 } from "../lib/feature-status.js";
 import { evaluateInstallWatchdog } from "../lib/install-watchdog.js";
-import { multipartParts } from "../lib/multipart-parts.js";
+import { multipartFailure, multipartParts } from "../lib/multipart-parts.js";
 import {
   assertOcrRuntimeInstallDiskSpace,
   downloadVerifiedRuntimeRelease,
@@ -1399,9 +1400,26 @@ export async function registerFeatureRoutes(app: FastifyInstance): Promise<void>
           reply.status(500);
           return { error: err.message };
         }
+        // multipartParts() marks a request the client broke (no boundary, a
+        // body that ends mid-part, a part over the size limit) with 400/413
+        // (#1473), so answer it as the client's rather than a 500 (#1539).
+        const status = (err as { statusCode?: unknown } | null)?.statusCode;
+        if (status === 400 || status === 413) {
+          const failure = multipartFailure(err);
+          reply.status(failure.status);
+          return failure.body;
+        }
         // Only explicit import/input validation failures are client errors.
         // Installer, dispatcher handoff, commit, and rollback failures are
-        // server-side faults and must remain retryable/observable as 5xx.
+        // server-side faults and must remain retryable/observable as 5xx, so
+        // log and report them before answering.
+        request.log.error({ err }, "Offline feature import failed");
+        void reportError(err, {
+          source: "http",
+          route: "/api/v1/admin/features/import",
+          method: "POST",
+          statusCode: 500,
+        });
         reply.status(500);
         return { error: errorMessage };
       } finally {
