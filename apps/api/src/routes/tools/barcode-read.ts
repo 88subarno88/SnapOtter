@@ -219,7 +219,9 @@ export function registerBarcodeRead(app: FastifyInstance) {
           try {
             fileBuffer = await decodeHeic(fileBuffer);
           } catch (err) {
-            if (isDecoderUnavailable(err)) throw err;
+            // A server fault (no decoder, no memory for its output) is not a
+            // bad file: the outer catch answers those as 503 (#1533).
+            if (isDecoderUnavailable(err) || isDecoderFault(err)) throw err;
             return reply.status(422).send({
               error: "Failed to decode HEIC file. Ensure libheif-examples is installed.",
               details: stripInternalPaths(err instanceof Error ? err.message : String(err)),
@@ -355,16 +357,19 @@ export function registerBarcodeRead(app: FastifyInstance) {
           // work while memory is short (#1469).
           const reload = !(err instanceof RangeError);
           // The size tells memory pressure (retry works) from an image too
-          // big for this server (it never will).
+          // big for this server (it never will). It's set once the image is
+          // decoded, so without it the failure came earlier: decoding the
+          // upload itself (HEIC, #1533), not zxing.
+          const stage = imageSize ? "barcode decoder" : "image decode";
           request.log.error(
-            { err, toolId: "barcode-read", imageSize, reload },
-            "Barcode decoder failed",
+            { err, toolId: "barcode-read", stage, imageSize, reload },
+            `Barcode read failed in the ${stage}`,
           );
           void reportError(err, { source: "http", toolId: "barcode-read", statusCode: 503 });
           if (reload) initZXingReader();
           return reply.status(503).send({
             error: "Barcode reading failed on this server.",
-            details: "The barcode decoder ran out of resources or failed. Try again.",
+            details: "The server ran out of resources reading this image. Try again.",
             code: "ENGINE_UNAVAILABLE",
           });
         }
