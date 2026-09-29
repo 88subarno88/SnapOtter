@@ -6,6 +6,7 @@ import PQueue from "p-queue";
 import sharp from "sharp";
 import { z } from "zod";
 import { env } from "../../config.js";
+import { INVALID_CLIENT_JOB_ID_ERROR, parseClientJobIdField } from "../../jobs/types.js";
 import { getSecurityHeaders } from "../../lib/csp.js";
 import { resolveConcurrency } from "../../lib/env.js";
 import { formatZodErrors } from "../../lib/errors.js";
@@ -122,6 +123,7 @@ export function registerSvgToRasterRoute(
     const files: ParsedSvgFile[] = [];
     let settingsRaw: string | null = null;
     let clientJobId: string | null = null;
+    let clientJobIdRaw: string | null = null;
 
     try {
       const parts = request.parts();
@@ -142,16 +144,19 @@ export function registerSvgToRasterRoute(
         } else if (part.fieldname === "settings") {
           settingsRaw = part.value as string;
         } else if (part.fieldname === "clientJobId") {
-          const raw = part.value as string;
-          if (typeof raw === "string" && raw.length > 0 && raw.length <= 128) {
-            clientJobId = raw;
-          }
+          clientJobIdRaw = part.value as string;
         }
       }
     } catch (err) {
       const failure = multipartFailure(err);
       return reply.status(failure.status).send(failure.body);
     }
+
+    const clientJobIdField = parseClientJobIdField(clientJobIdRaw);
+    if (clientJobIdField === null) {
+      return reply.status(400).send({ error: INVALID_CLIENT_JOB_ID_ERROR });
+    }
+    clientJobId = clientJobIdField ?? null;
 
     if (files.length === 0) {
       return reply.status(400).send({ error: "No SVG files provided" });

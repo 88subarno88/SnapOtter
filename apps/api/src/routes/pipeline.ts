@@ -18,7 +18,13 @@ import { env } from "../config.js";
 import { db, schema } from "../db/index.js";
 import { recordChildOutcome } from "../jobs/batch-progress.js";
 import { getFlowProducer, injectTraceContext, waitForJob } from "../jobs/enqueue.js";
-import { type Pool, queueName, type ToolJobData } from "../jobs/types.js";
+import {
+  INVALID_CLIENT_JOB_ID_ERROR,
+  type Pool,
+  parseClientJobIdField,
+  queueName,
+  type ToolJobData,
+} from "../jobs/types.js";
 import { autoOrient } from "../lib/auto-orient.js";
 import { getSecurityHeaders } from "../lib/csp.js";
 import { reportEngineUnavailable } from "../lib/engine-unavailable.js";
@@ -301,6 +307,7 @@ export async function registerPipelineRoutes(app: FastifyInstance): Promise<void
           let filename = "file";
           let pipelineRaw: string | null = null;
           let clientJobId: string | null = null;
+          let clientJobIdRaw: string | null = null;
 
           // Parse multipart
           try {
@@ -330,10 +337,7 @@ export async function registerPipelineRoutes(app: FastifyInstance): Promise<void
               } else if (part.fieldname === "pipeline") {
                 pipelineRaw = part.value as string;
               } else if (part.fieldname === "clientJobId") {
-                const raw = part.value as string;
-                if (typeof raw === "string" && raw.length > 0 && raw.length <= 128) {
-                  clientJobId = raw;
-                }
+                clientJobIdRaw = part.value as string;
               }
             }
           } catch (err) {
@@ -343,6 +347,12 @@ export async function registerPipelineRoutes(app: FastifyInstance): Promise<void
               details: err instanceof Error ? err.message : String(err),
             });
           }
+
+          const clientJobIdField = parseClientJobIdField(clientJobIdRaw);
+          if (clientJobIdField === null) {
+            return reply.status(400).send({ error: INVALID_CLIENT_JOB_ID_ERROR });
+          }
+          clientJobId = clientJobIdField ?? null;
 
           if (!file || file.size === 0) {
             return reply.status(400).send({ error: "No file provided" });
@@ -958,6 +968,7 @@ export async function registerPipelineRoutes(app: FastifyInstance): Promise<void
           const files: SpooledMultipartFile[] = [];
           let pipelineRaw: string | null = null;
           let clientJobId: string | null = null;
+          let clientJobIdRaw: string | null = null;
           let filePartIndex = 0;
           let totalStagedBytes = 0;
 
@@ -992,10 +1003,7 @@ export async function registerPipelineRoutes(app: FastifyInstance): Promise<void
               } else if (part.fieldname === "pipeline") {
                 pipelineRaw = part.value as string;
               } else if (part.fieldname === "clientJobId") {
-                const raw = part.value as string;
-                if (typeof raw === "string" && raw.length > 0 && raw.length <= 128) {
-                  clientJobId = raw;
-                }
+                clientJobIdRaw = part.value as string;
               }
             }
           } catch (err) {
@@ -1005,6 +1013,12 @@ export async function registerPipelineRoutes(app: FastifyInstance): Promise<void
               details: err instanceof Error ? err.message : String(err),
             });
           }
+
+          const clientJobIdField = parseClientJobIdField(clientJobIdRaw);
+          if (clientJobIdField === null) {
+            return reply.status(400).send({ error: INVALID_CLIENT_JOB_ID_ERROR });
+          }
+          clientJobId = clientJobIdField ?? null;
 
           if (files.length === 0) {
             return reply.status(400).send({ error: "No files provided" });
