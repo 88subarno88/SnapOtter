@@ -7,6 +7,11 @@
  * reloads by hand. Vite reports exactly this as a window "vite:preloadError"
  * event; the handler reloads once, with a guard so a genuinely broken server
  * cannot cause a reload loop.
+ *
+ * Firefox and Safari also reject in-flight imports when the page starts
+ * navigating away, which fires the same event. Reloading then reloaded the
+ * page being left and cancelled the navigation (#912), so failures that
+ * follow a beforeunload are left alone.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -14,12 +19,17 @@ import {
   CHUNK_RELOAD_GUARD_KEY,
   CHUNK_RELOAD_GUARD_MS,
   installChunkReloadHandler,
+  LEAVING_WINDOW_MS,
 } from "@/lib/chunk-reload";
 
 function fireChunkError(): Event {
   const event = new Event("vite:preloadError", { cancelable: true });
   window.dispatchEvent(event);
   return event;
+}
+
+function startLeaving(): void {
+  window.dispatchEvent(new Event("beforeunload", { cancelable: true }));
 }
 
 describe("installChunkReloadHandler", () => {
@@ -92,5 +102,58 @@ describe("installChunkReloadHandler", () => {
 
     setItem.mockRestore();
     getItem.mockRestore();
+  });
+
+  describe("while the page is being left (#912)", () => {
+    it("does not reload, which would cancel the navigation", () => {
+      startLeaving();
+      vi.advanceTimersByTime(200);
+      const event = fireChunkError();
+
+      expect(reload).not.toHaveBeenCalled();
+      // Left unhandled: if the navigation was cancelled after all, the
+      // boundary shows the real chunk error, not an undefined module.
+      expect(event.defaultPrevented).toBe(false);
+      // Nothing reloaded, so a real deploy afterwards still gets its reload.
+      expect(sessionStorage.getItem(CHUNK_RELOAD_GUARD_KEY)).toBeNull();
+    });
+
+    it("reloads again once the leaving window has passed (the leave was cancelled)", () => {
+      startLeaving();
+      vi.advanceTimersByTime(LEAVING_WINDOW_MS + 1);
+      fireChunkError();
+
+      expect(reload).toHaveBeenCalledTimes(1);
+    });
+
+    it("reloads again after the page comes back from the back/forward cache", () => {
+      startLeaving();
+      vi.advanceTimersByTime(500);
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+      fireChunkError();
+
+      expect(reload).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps leaving through a pageshow that is not a back/forward restore", () => {
+      // A slow first load can still fire load/pageshow while being left.
+      startLeaving();
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: false }));
+      fireChunkError();
+
+      expect(reload).not.toHaveBeenCalled();
+    });
+
+    it("removes every listener it added once uninstalled", () => {
+      const remove = vi.spyOn(window, "removeEventListener");
+      uninstall();
+
+      const removed = remove.mock.calls.map(([type]) => type);
+      expect(removed).toEqual(
+        expect.arrayContaining(["beforeunload", "pageshow", "vite:preloadError"]),
+      );
+      remove.mockRestore();
+      uninstall = installChunkReloadHandler(reload);
+    });
   });
 });

@@ -109,8 +109,10 @@ const LEGACY_VISUAL_SPECS = /visual-regression\.spec\.ts/;
 
 // Stable, engine-neutral coverage shared by Firefox and WebKit. Broader specs
 // remain Chromium-owned when they rely on engine-specific browser behavior.
+// chunk-reload is here for the opposite reason: Firefox and WebKit abort
+// in-flight imports on navigation and Chromium doesn't (#912).
 const CROSS_BROWSER_SPECS =
-  /(?:^|[/\\])(?:gui-cross-browser|smoke|navigation|home-page)\.spec\.ts$/;
+  /(?:^|[/\\])(?:gui-cross-browser|smoke|navigation|home-page|chunk-reload)\.spec\.ts$/;
 
 // Exact CSS boundary and wide-screen ownership lives in one small project so
 // these widths cannot disappear inside device presets or ad-hoc test overrides.

@@ -12,10 +12,21 @@
  * window fall through to the error boundary instead of looping: chunks that
  * are still missing after a fresh load mean the server is broken, not
  * updated.
+ *
+ * Firefox and Safari also abort in-flight imports when the page starts
+ * navigating away, which raises the same event. Reloading then reloads the
+ * page being left and cancels the navigation (#912), so failures that follow
+ * a beforeunload are left alone. Vite needs the answer synchronously, and
+ * beforeunload is the first step of every cross-document navigation. The
+ * listener costs Firefox's back/forward cache for these pages; in-app
+ * navigation is pushState, so only cross-document history pays for it.
  */
 
 export const CHUNK_RELOAD_GUARD_KEY = "snapotter-chunk-reload-at";
 export const CHUNK_RELOAD_GUARD_MS = 30_000;
+// How long after beforeunload a chunk failure is blamed on the navigation.
+// There is no event for a cancelled leave, so this is what ends it.
+export const LEAVING_WINDOW_MS = 10_000;
 
 function readLastReloadAt(): number {
   try {
@@ -37,13 +48,30 @@ function markReloadedNow(): void {
 export function installChunkReloadHandler(
   reload: () => void = () => window.location.reload(),
 ): () => void {
+  let leavingAt = Number.NEGATIVE_INFINITY;
+  const onBeforeUnload = () => {
+    leavingAt = Date.now();
+  };
+  // A page restored from the back/forward cache is no longer being left.
+  const onPageShow = (event: PageTransitionEvent) => {
+    if (event.persisted) leavingAt = Number.NEGATIVE_INFINITY;
+  };
   const onPreloadError = (event: Event) => {
+    // Unhandled on purpose: if the leave is cancelled after all, the error
+    // boundary shows the real chunk error rather than an undefined module.
+    if (Date.now() - leavingAt < LEAVING_WINDOW_MS) return;
     if (Date.now() - readLastReloadAt() < CHUNK_RELOAD_GUARD_MS) return;
     markReloadedNow();
     // Handled here: stop Vite from rethrowing into the error boundary.
     event.preventDefault();
     reload();
   };
+  window.addEventListener("beforeunload", onBeforeUnload);
+  window.addEventListener("pageshow", onPageShow);
   window.addEventListener("vite:preloadError", onPreloadError);
-  return () => window.removeEventListener("vite:preloadError", onPreloadError);
+  return () => {
+    window.removeEventListener("beforeunload", onBeforeUnload);
+    window.removeEventListener("pageshow", onPageShow);
+    window.removeEventListener("vite:preloadError", onPreloadError);
+  };
 }
