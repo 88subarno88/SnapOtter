@@ -252,6 +252,7 @@ export function owningJobIds(dirJobId: string): string[] {
 }
 
 const FINISHED_STATUSES = ["completed", "failed", "canceled"] as const;
+const DELETE_AFTER_ERRORS_LOGGED = 20;
 
 async function storageTtlSweep(): Promise<{ removed: number; failed: number }> {
   // Build set of user IDs under legal hold (direct or via team) once per sweep
@@ -283,6 +284,9 @@ async function storageTtlSweep(): Promise<{ removed: number; failed: number }> {
   // but only for a finished job: one still queued or running needs its input
   // (#1412), and the next sweep after it finishes honors the deadline.
   let deleteAfterCleaned = 0;
+  // A failed deadline deletion is a retention promise not kept, so it is
+  // counted and logged like the global sweep's failures, never dropped (#1442).
+  const deleteAfterErrors: string[] = [];
   try {
     const expiredJobs = await db
       .select({ id: schema.jobs.id, userId: schema.jobs.userId })
@@ -298,31 +302,50 @@ async function storageTtlSweep(): Promise<{ removed: number; failed: number }> {
     for (const job of expiredJobs) {
       // Skip jobs belonging to users under legal hold
       if (job.userId && heldUserIds.has(job.userId)) continue;
-      try {
-        await deletePrefix(`uploads/${job.id}`);
-        await deletePrefix(`outputs/${job.id}`);
-        deleteAfterCleaned++;
-      } catch {
-        // Directory may not exist
+      // deletePrefix already tolerates a missing dir, so anything thrown here
+      // is a real fault. Each prefix is tried on its own, so a failed uploads/
+      // delete doesn't also leave outputs/ behind.
+      let cleaned = true;
+      for (const prefix of [`uploads/${job.id}`, `outputs/${job.id}`]) {
+        try {
+          await deletePrefix(prefix);
+        } catch (err) {
+          cleaned = false;
+          const message = err instanceof Error ? err.message : String(err);
+          deleteAfterErrors.push(`${prefix}: ${message}`);
+        }
       }
+      if (cleaned) deleteAfterCleaned++;
     }
 
     if (deleteAfterCleaned > 0) {
       console.log(`Storage TTL: cleaned up ${deleteAfterCleaned} jobs by deleteAfter`);
     }
-  } catch {
-    // deleteAfter sweep is best-effort
+  } catch (err) {
+    // Best-effort: the global sweep below still runs, but say why the
+    // deadline sweep didn't. The whole error goes to the log, not its message:
+    // drizzle's DrizzleQueryError message is only the SQL, and the reason (a
+    // dropped connection, a missing column) is on its cause.
+    console.error("Storage TTL: deleteAfter sweep failed:", err);
+  }
+  if (deleteAfterErrors.length > 0) {
+    // Capped: a store-wide fault fails every past-deadline job, every sweep.
+    const shown = deleteAfterErrors.slice(0, DELETE_AFTER_ERRORS_LOGGED);
+    const more = deleteAfterErrors.length - shown.length;
+    console.error(
+      `Storage TTL: ${deleteAfterErrors.length} deleteAfter dir(s) failed to delete:\n${shown.join("\n")}${more > 0 ? `\n...and ${more} more` : ""}`,
+    );
   }
 
   // --- Global TTL sweep ---
   const maxAgeMs = await getMaxAgeMs();
-  if (maxAgeMs <= 0) return { removed: deleteAfterCleaned, failed: 0 };
+  if (maxAgeMs <= 0) return { removed: deleteAfterCleaned, failed: deleteAfterErrors.length };
 
   const cutoffMs = Date.now() - maxAgeMs;
   const uploadDirs = await listJobDirs("uploads");
   const outputDirs = await listJobDirs("outputs");
   const allDirs = [...uploadDirs, ...outputDirs];
-  if (allDirs.length === 0) return { removed: 0, failed: 0 };
+  if (allDirs.length === 0) return { removed: 0, failed: deleteAfterErrors.length };
 
   // Batch-lookup job rows for dirs with unknown mtime (S3 backend)
   const unknownIds = [
@@ -403,7 +426,10 @@ async function storageTtlSweep(): Promise<{ removed: number; failed: number }> {
   if (kept > 0) {
     console.log(`Storage TTL: kept ${kept} expired job dirs whose jobs are still in flight`);
   }
-  return { removed: removed + deleteAfterCleaned, failed: errors.length };
+  return {
+    removed: removed + deleteAfterCleaned,
+    failed: errors.length + deleteAfterErrors.length,
+  };
 }
 
 // -- Retention sweep ----------------------------------------------------------
