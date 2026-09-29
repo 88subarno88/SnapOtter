@@ -9,6 +9,7 @@ import {
   rmSync,
   symlinkSync,
   unlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -122,7 +123,6 @@ function createRuntimeFixture(): {
   writeFileSync(smallModelPath, "small", "utf-8");
   writeFileSync(mediumModelPath, "medium", "utf-8");
   writeFileSync(sitePackagePath, "rapidocr-v1\n", "utf-8");
-  chmodSync(pythonPath, 0o755);
 
   const files = [
     ["venv/bin/python", "#!/bin/sh\n", 0o755],
@@ -139,6 +139,9 @@ function createRuntimeFixture(): {
     size: Buffer.byteLength(contents as string),
     mode,
   }));
+  // Give each file the mode the signed index records, as the installer does,
+  // so the fixture doesn't depend on the process umask (#1481).
+  for (const file of files) chmodSync(join(runtimeRoot, String(file.path)), Number(file.mode));
   const artifact = {
     family: "ocr",
     target: "linux-amd64-cpu-py312",
@@ -648,6 +651,11 @@ describe("readActiveRuntime", () => {
 
     expect(readActiveRuntime("ocr", options)).not.toBeNull();
     writeFileSync(fixture.sitePackagePath, "rapidocr-v2\n", "utf-8");
+    // A real edit lands long after the last check. Kernels before 6.13 keep
+    // file timestamps at clock-tick granularity, so a rewrite in the same
+    // tick keeps its mtime; set it as a later edit would leave it (#1481).
+    const later = new Date(Date.now() + 60_000);
+    utimesSync(fixture.sitePackagePath, later, later);
 
     expect(readActiveRuntime("ocr", options)).toBeNull();
   });
@@ -715,6 +723,27 @@ describe("readActiveRuntime", () => {
         arch: "x64",
       }),
     ).toBeNull();
+  });
+
+  it.each([
+    ["002", 0o002],
+    // What docker/entrypoint.sh sets for the app in the container.
+    ["007", 0o007],
+    ["077", 0o077],
+  ])("builds a valid fixture whatever the process umask is (umask %s, #1481)", (_label, umask) => {
+    // The payload check compares each file's mode with the signed one, so a
+    // fixture written under any umask but 022 used to fail.
+    const previous = process.umask(umask);
+    let fixture: ReturnType<typeof createRuntimeFixture>;
+    try {
+      fixture = createRuntimeFixture();
+    } finally {
+      process.umask(previous);
+    }
+
+    expect(
+      readActiveRuntime("ocr", { aiDataDir: fixture.aiDataDir, platform: "linux", arch: "x64" }),
+    ).not.toBeNull();
   });
 
   it("resolves the AI root from AI_DATA_DIR", () => {
@@ -925,9 +954,11 @@ describe("invalid runtime diagnostics (#1433)", () => {
 
     writeFileSync(fixture.smallModelPath, "broken", "utf-8");
     getOcrRuntimeCapability(options);
-    // Put the model back so only one thing is wrong at a time.
+    // Put the model back so only one thing is wrong at a time. The adapter
+    // was hashed by the first read; a different length keeps its rewrite
+    // visible on kernels with coarse file timestamps (#1481).
     writeFileSync(fixture.smallModelPath, "small", "utf-8");
-    writeFileSync(fixture.adapterPath, "# evil adapter\n", "utf-8");
+    writeFileSync(fixture.adapterPath, "# a much more evil adapter\n", "utf-8");
     getOcrRuntimeCapability(options);
 
     expect(warnings(warn)).toEqual([
