@@ -71,7 +71,6 @@ const SMALL_SVG = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><rect/></
 let testApp: TestApp;
 let adminToken: string;
 let adminId: string;
-let adminTeam: string;
 /** Rows and blobs the success cases keep, removed in afterAll. */
 const keptIds: string[] = [];
 const keptBlobs: string[] = [];
@@ -80,11 +79,10 @@ beforeAll(async () => {
   testApp = await buildTestApp();
   adminToken = await loginAsAdmin(testApp.app);
   const [admin] = await db
-    .select({ id: schema.users.id, team: schema.users.team })
+    .select({ id: schema.users.id })
     .from(schema.users)
     .where(eq(schema.users.username, "admin"));
   adminId = admin.id;
-  adminTeam = admin.team;
 }, 30_000);
 
 afterAll(async () => {
@@ -102,10 +100,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   vi.restoreAllMocks();
-  await db
-    .update(schema.users)
-    .set({ storageQuota: null, team: adminTeam })
-    .where(eq(schema.users.id, adminId));
+  await db.update(schema.users).set({ storageQuota: null }).where(eq(schema.users.id, adminId));
   await db.update(schema.teams).set({ storageQuota: null });
 });
 
@@ -187,9 +182,6 @@ describe("multi-file library upload is all-or-nothing (#1342)", () => {
       .select({ id: schema.teams.id })
       .from(schema.teams)
       .where(eq(schema.teams.name, "Default"));
-    // users.team holds a team id for users created through the API; the
-    // bootstrap admin keeps the column default, so point it at the real row.
-    await db.update(schema.users).set({ team: team.id }).where(eq(schema.users.id, adminId));
     // Summed the way checkStorageQuota does: other users in this fork's
     // database may share the team.
     const [{ total }] = await db

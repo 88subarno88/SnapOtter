@@ -196,8 +196,23 @@ export function createSessionToken(): string {
 export async function ensureDefaultTeam(): Promise<void> {
   await db
     .insert(schema.teams)
-    .values({ id: "default-team-00000000", name: "Default" })
+    .values({ id: schema.DEFAULT_TEAM_ID, name: "Default" })
     .onConflictDoNothing();
+}
+
+/**
+ * The Default team's id: the team named "Default", else the seeded id (the
+ * seeded team renamed). Register, SSO, and SCIM resolve it the same way, and
+ * the bootstrap users need it explicitly (#1474): the seed above is skipped
+ * when another team already holds the name, so the column default alone can
+ * point at a team that doesn't exist.
+ */
+async function defaultTeamId(): Promise<string> {
+  const [team] = await db
+    .select({ id: schema.teams.id })
+    .from(schema.teams)
+    .where(eq(schema.teams.name, "Default"));
+  return team?.id ?? schema.DEFAULT_TEAM_ID;
 }
 
 export async function ensureAnonymousUser(): Promise<void> {
@@ -210,6 +225,7 @@ export async function ensureAnonymousUser(): Promise<void> {
       id: "anonymous",
       username: "anonymous",
       role: "admin",
+      team: await defaultTeamId(),
       mustChangePassword: false,
       authProvider: "local",
     })
@@ -231,6 +247,7 @@ export async function ensureDefaultAdmin(): Promise<void> {
       username: env.DEFAULT_USERNAME,
       passwordHash,
       role: "admin",
+      team: await defaultTeamId(),
       mustChangePassword: mustChange,
     })
     .onConflictDoNothing();

@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "./index.js";
 import { runMigrations } from "./migrate.js";
+import { DEFAULT_TEAM_ID } from "./schema.js";
 
 // Advisory lock: 7_421_xxx reserved for SnapOtter app locks (7_421_001 = schema migrate).
 const SQLITE_IMPORT_LOCK_KEY = 7_421_002;
@@ -269,6 +270,23 @@ async function heldIdentities(tx: { execute: typeof db.execute }): Promise<Set<s
   return held;
 }
 
+/**
+ * users.team holds a team's id (#1474). 1.x wrote ids too, except where a row
+ * kept the column default "Default", a team *name*. Map any imported name to
+ * the id of the team that carries it, then read a leftover "Default" (no team
+ * of that name came over) as the default team's seeded id. Mirrors migration
+ * 0009, which fixes rows that predate it: the import runs after migrations, so
+ * it has to do the same for what it brings.
+ */
+async function mapUserTeamNamesToIds(tx: { execute: typeof db.execute }): Promise<void> {
+  await tx.execute(sql`
+    UPDATE users u SET team = t.id FROM teams t
+    WHERE u.team = t.name AND NOT EXISTS (SELECT 1 FROM teams x WHERE x.id = u.team)`);
+  await tx.execute(sql`
+    UPDATE users SET team = ${DEFAULT_TEAM_ID}
+    WHERE team = 'Default' AND NOT EXISTS (SELECT 1 FROM teams x WHERE x.id = 'Default')`);
+}
+
 /** Live target columns for a public table (drizzle transaction handle). */
 async function targetColumns(
   tx: { execute: typeof db.execute },
@@ -365,6 +383,8 @@ export async function migrateFromSqlite(
         }
         result.tables[table] = inserted;
       }
+
+      await mapUserTeamNamesToIds(tx);
     });
   } finally {
     sqlite.close();
