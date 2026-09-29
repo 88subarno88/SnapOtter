@@ -4499,7 +4499,6 @@ export const id: TranslationKeys = {
       newPasswordPlaceholder: "Kata Sandi Baru",
       confirmPasswordPlaceholder: "Konfirmasi Kata Sandi Baru",
       passwordsMismatch: "Kata sandi tidak cocok",
-      passwordTooShort: "Kata sandi harus minimal 4 karakter",
       changeSuccess: "Kata sandi berhasil diubah",
       changeFailed: "Gagal mengubah kata sandi",
       currentPasswordIncorrect: "Kata sandi saat ini salah",
@@ -4558,6 +4557,12 @@ export const id: TranslationKeys = {
       securitySettingsSaved: "Pengaturan keamanan tersimpan",
       securitySettingsFailed: "Gagal menyimpan pengaturan keamanan",
       adminSettingsLoadFailed: "Gagal memuat pengaturan keamanan.",
+      twoFactorStateChanged:
+        "Autentikasi dua faktor diubah di jendela lain. Muat ulang lalu coba lagi.",
+      twoFactorUnreadable:
+        "Server tidak dapat membaca pengaturan autentikasi dua faktor Anda. Hubungi administrator.",
+      ssoNeedsProvider:
+        "Penerapan SSO memerlukan penyedia OIDC atau SAML yang sudah dikonfigurasi.",
     },
     people: {
       heading: "Anggota",
@@ -4613,6 +4618,11 @@ export const id: TranslationKeys = {
         "Salin kata sandi ini sekarang. Anda tidak akan bisa melihatnya setelah membuat pengguna.",
       memberCount: "{count} anggota",
       memberCountPlural: "{count} anggota",
+      usernameTaken: "Nama pengguna itu sudah dipakai",
+      lastAdmin: "Harus selalu ada setidaknya satu admin",
+      cannotDeleteSelf: "Tidak dapat menghapus akun Anda sendiri",
+      usernameInvalid:
+        "Nama pengguna harus 3 sampai 50 karakter dan hanya boleh berisi a-z, A-Z, 0-9, titik, tanda hubung, dan garis bawah",
     },
     teams: {
       heading: "Tim",
@@ -4650,6 +4660,7 @@ export const id: TranslationKeys = {
       teamRetentionHoursDesc:
         "Retensi file pemrosesan untuk tim ini. Kosongkan untuk menggunakan default global.",
       quotaSaved: "Pengaturan tim tersimpan",
+      quotaSaveFailed: "Gagal menyimpan pengaturan tim",
     },
     roles: {
       heading: "Peran",
@@ -4689,6 +4700,9 @@ export const id: TranslationKeys = {
         teams: "Tim",
         system: "Sistem",
       },
+      nameInvalid:
+        "Nama peran harus 2 sampai 30 karakter dan hanya boleh berisi a-z, 0-9, tanda hubung, dan garis bawah",
+      permissionsRequired: "Pilih setidaknya satu izin",
     },
     auditLog: {
       heading: "Log Audit",
@@ -4831,6 +4845,8 @@ export const id: TranslationKeys = {
       resetFailed: "Reset gagal: {error}",
       resetVenvKept:
         "Lingkungan Python bersama dibiarkan apa adanya: instalasi ini tidak memiliki basis bawaan untuk membangunnya kembali. Model, cache unduhan, dan catatan instalasi sudah dihapus. Buat ulang lingkungan tersebut sendiri jika paket usang di dalamnya adalah penyebab masalahnya.",
+      importBusy: "Instalasi atau impor lain sedang berjalan. Coba lagi setelah selesai.",
+      importNoSpace: "Ruang disk server tidak cukup untuk bundel ini.",
     },
     about: {
       heading: "Tentang",
@@ -5194,6 +5210,11 @@ export const id: TranslationKeys = {
     passwordNeedsDigit: "Kata sandi harus mengandung angka.",
     passwordNeedsSpecial: "Kata sandi harus mengandung karakter khusus.",
     tooManyRequests: "Terlalu banyak percobaan. Tunggu satu menit lalu coba lagi.",
+    escalationDenied: "Tindakan itu memerlukan akses lebih dari yang dimiliki peran Anda.",
+    featureNotLicensed: "Ini memerlukan lisensi enterprise.",
+    sessionEnded: "Sesi Anda telah berakhir. Masuk lagi.",
+    forbidden: "Anda tidak memiliki izin untuk melakukan itu.",
+    invalidSetting: "Nilai tidak valid untuk {setting}.",
   },
   sidebar: {
     sponsor: "Dukung kami",

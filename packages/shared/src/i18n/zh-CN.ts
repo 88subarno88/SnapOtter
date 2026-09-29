@@ -4233,7 +4233,6 @@ export const zhCN: TranslationKeys = {
       newPasswordPlaceholder: "新密码",
       confirmPasswordPlaceholder: "确认新密码",
       passwordsMismatch: "两次密码输入不一致",
-      passwordTooShort: "密码长度至少为 4 个字符",
       changeSuccess: "密码修改成功",
       changeFailed: "密码修改失败",
       currentPasswordIncorrect: "当前密码不正确",
@@ -4288,6 +4287,9 @@ export const zhCN: TranslationKeys = {
       securitySettingsSaved: "安全设置已保存",
       securitySettingsFailed: "保存安全设置失败",
       adminSettingsLoadFailed: "无法加载安全设置。",
+      twoFactorStateChanged: "双重身份验证已在另一个窗口中更改。请刷新后重试。",
+      twoFactorUnreadable: "服务器无法读取您的双重身份验证设置。请联系管理员。",
+      ssoNeedsProvider: "要启用 SSO 强制登录，请先配置 OIDC 或 SAML 提供商。",
     },
     people: {
       heading: "成员",
@@ -4342,6 +4344,10 @@ export const zhCN: TranslationKeys = {
       copyPasswordWarning: "请立即复制此密码。创建用户后将无法再次查看。",
       memberCount: "{count} 个成员",
       memberCountPlural: "{count} 个成员",
+      usernameTaken: "该用户名已被使用",
+      lastAdmin: "必须始终保留至少一名管理员",
+      cannotDeleteSelf: "无法删除自己的账户",
+      usernameInvalid: "用户名须为 3 到 50 个字符，只能包含 a-z、A-Z、0-9、点、连字符和下划线",
     },
     teams: {
       heading: "团队",
@@ -4377,6 +4383,7 @@ export const zhCN: TranslationKeys = {
       teamRetentionHours: "保留时间（小时）",
       teamRetentionHoursDesc: "此团队的处理文件保留时间。留空使用全局默认值。",
       quotaSaved: "团队设置已保存",
+      quotaSaveFailed: "团队设置保存失败",
     },
     roles: {
       heading: "角色",
@@ -4416,6 +4423,8 @@ export const zhCN: TranslationKeys = {
         teams: "团队",
         system: "系统",
       },
+      nameInvalid: "角色名称须为 2 到 30 个字符，只能包含 a-z、0-9、连字符和下划线",
+      permissionsRequired: "请至少选择一项权限",
     },
     auditLog: {
       heading: "审计日志",
@@ -4551,6 +4560,8 @@ export const zhCN: TranslationKeys = {
       resetFailed: "重置失败：{error}",
       resetVenvKept:
         "共享的 Python 环境已原样保留：此安装没有可用于重建它的内置基础包。模型、下载缓存和安装记录已清除。如果问题出在其中某个过时的包上，请你自行重建该环境。",
+      importBusy: "另一个安装或导入正在进行。请在其完成后重试。",
+      importNoSpace: "服务器磁盘空间不足，无法导入此包。",
     },
     about: {
       heading: "关于",
@@ -4901,6 +4912,11 @@ export const zhCN: TranslationKeys = {
     passwordNeedsDigit: "密码必须包含一个数字。",
     passwordNeedsSpecial: "密码必须包含一个特殊字符。",
     tooManyRequests: "尝试次数过多。请等待一分钟后重试。",
+    escalationDenied: "此操作需要超出您角色的权限。",
+    featureNotLicensed: "这需要企业版许可证。",
+    sessionEnded: "您的会话已结束。请重新登录。",
+    forbidden: "您没有执行此操作的权限。",
+    invalidSetting: "{setting} 的值无效。",
   },
   sidebar: {
     sponsor: "支持我们",

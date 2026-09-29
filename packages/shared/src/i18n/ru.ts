@@ -4505,7 +4505,6 @@ export const ru: TranslationKeys = {
       newPasswordPlaceholder: "Новый пароль",
       confirmPasswordPlaceholder: "Подтвердите новый пароль",
       passwordsMismatch: "Пароли не совпадают",
-      passwordTooShort: "Пароль должен содержать не менее 4 символов",
       changeSuccess: "Пароль успешно изменён",
       changeFailed: "Не удалось изменить пароль",
       currentPasswordIncorrect: "Текущий пароль неверен",
@@ -4565,6 +4564,12 @@ export const ru: TranslationKeys = {
       securitySettingsSaved: "Настройки безопасности сохранены",
       securitySettingsFailed: "Не удалось сохранить настройки безопасности",
       adminSettingsLoadFailed: "Не удалось загрузить настройки безопасности.",
+      twoFactorStateChanged:
+        "Двухфакторная аутентификация изменена в другом окне. Обновите страницу и попробуйте снова.",
+      twoFactorUnreadable:
+        "Сервер не может прочитать настройки двухфакторной аутентификации. Обратитесь к администратору.",
+      ssoNeedsProvider:
+        "Чтобы включить принудительный SSO, сначала настройте провайдера OIDC или SAML.",
     },
     people: {
       heading: "Пользователи",
@@ -4620,6 +4625,11 @@ export const ru: TranslationKeys = {
         "Скопируйте этот пароль сейчас. После создания пользователя вы не сможете его увидеть.",
       memberCount: "{count} участник",
       memberCountPlural: "{count} участников",
+      usernameTaken: "Это имя пользователя уже занято",
+      lastAdmin: "Всегда должен оставаться хотя бы один администратор",
+      cannotDeleteSelf: "Нельзя удалить собственную учётную запись",
+      usernameInvalid:
+        "Имя пользователя должно содержать от 3 до 50 символов и только a-z, A-Z, 0-9, точки, дефисы и подчёркивания",
     },
     teams: {
       heading: "Команды",
@@ -4657,6 +4667,7 @@ export const ru: TranslationKeys = {
       teamRetentionHoursDesc:
         "Срок хранения обработанных файлов для этой команды. Оставьте пустым для значения по умолчанию.",
       quotaSaved: "Настройки команды сохранены",
+      quotaSaveFailed: "Не удалось сохранить настройки команды",
     },
     roles: {
       heading: "Роли",
@@ -4696,6 +4707,9 @@ export const ru: TranslationKeys = {
         teams: "Команды",
         system: "Система",
       },
+      nameInvalid:
+        "Название роли должно содержать от 2 до 30 символов и только a-z, 0-9, дефисы и подчёркивания",
+      permissionsRequired: "Выберите хотя бы одно право доступа",
     },
     auditLog: {
       heading: "Журнал аудита",
@@ -4839,6 +4853,9 @@ export const ru: TranslationKeys = {
       resetFailed: "Ошибка сброса: {error}",
       resetVenvKept:
         "Общее окружение Python оставлено на месте: в этой установке нет встроенной базы, из которой его можно пересобрать. Модели, кэш загрузок и записи об установке очищены. Пересоздайте это окружение самостоятельно, если проблема в устаревшем пакете внутри него.",
+      importBusy:
+        "Уже выполняется другая установка или импорт. Повторите попытку после завершения.",
+      importNoSpace: "На сервере недостаточно места на диске для этого пакета.",
     },
     about: {
       heading: "О программе",
@@ -5202,6 +5219,11 @@ export const ru: TranslationKeys = {
     passwordNeedsDigit: "Пароль должен содержать цифру.",
     passwordNeedsSpecial: "Пароль должен содержать специальный символ.",
     tooManyRequests: "Слишком много попыток. Подождите минуту и попробуйте снова.",
+    escalationDenied: "Для этого нужно больше прав, чем есть у вашей роли.",
+    featureNotLicensed: "Для этого нужна корпоративная лицензия.",
+    sessionEnded: "Ваш сеанс завершён. Войдите снова.",
+    forbidden: "У вас нет прав на это действие.",
+    invalidSetting: "Недопустимое значение параметра «{setting}».",
   },
   sidebar: {
     sponsor: "Поддержите нас",

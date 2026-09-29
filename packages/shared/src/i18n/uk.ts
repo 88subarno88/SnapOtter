@@ -4504,7 +4504,6 @@ export const uk: TranslationKeys = {
       newPasswordPlaceholder: "Новий пароль",
       confirmPasswordPlaceholder: "Підтвердіть новий пароль",
       passwordsMismatch: "Паролі не збігаються",
-      passwordTooShort: "Пароль має містити щонайменше 4 символи",
       changeSuccess: "Пароль успішно змінено",
       changeFailed: "Не вдалося змінити пароль",
       currentPasswordIncorrect: "Поточний пароль невірний",
@@ -4564,6 +4563,11 @@ export const uk: TranslationKeys = {
       securitySettingsSaved: "Налаштування безпеки збережено",
       securitySettingsFailed: "Не вдалося зберегти налаштування безпеки",
       adminSettingsLoadFailed: "Не вдалося завантажити налаштування безпеки.",
+      twoFactorStateChanged:
+        "Двофакторну автентифікацію змінено в іншому вікні. Оновіть сторінку й спробуйте ще раз.",
+      twoFactorUnreadable:
+        "Сервер не може прочитати налаштування двофакторної автентифікації. Зверніться до адміністратора.",
+      ssoNeedsProvider: "Щоб увімкнути примусове SSO, спершу налаштуйте провайдера OIDC або SAML.",
     },
     people: {
       heading: "Користувачі",
@@ -4619,6 +4623,11 @@ export const uk: TranslationKeys = {
         "Скопіюйте цей пароль зараз. Після створення користувача ви не зможете його побачити.",
       memberCount: "{count} учасник",
       memberCountPlural: "{count} учасників",
+      usernameTaken: "Це ім'я користувача вже зайняте",
+      lastAdmin: "Завжди має залишатися щонайменше один адміністратор",
+      cannotDeleteSelf: "Неможливо видалити власний обліковий запис",
+      usernameInvalid:
+        "Ім'я користувача має містити від 3 до 50 символів і лише a-z, A-Z, 0-9, крапки, дефіси та підкреслення",
     },
     teams: {
       heading: "Команди",
@@ -4656,6 +4665,7 @@ export const uk: TranslationKeys = {
       teamRetentionHoursDesc:
         "Час зберігання файлів обробки для цієї команди. Залиште порожнім для глобального значення.",
       quotaSaved: "Налаштування команди збережено",
+      quotaSaveFailed: "Не вдалося зберегти налаштування команди",
     },
     roles: {
       heading: "Ролі",
@@ -4695,6 +4705,9 @@ export const uk: TranslationKeys = {
         teams: "Команди",
         system: "Система",
       },
+      nameInvalid:
+        "Назва ролі має містити від 2 до 30 символів і лише a-z, 0-9, дефіси та підкреслення",
+      permissionsRequired: "Виберіть принаймні одне право доступу",
     },
     auditLog: {
       heading: "Журнал аудиту",
@@ -4836,6 +4849,9 @@ export const uk: TranslationKeys = {
       resetFailed: "Не вдалося скинути: {error}",
       resetVenvKept:
         "Спільне середовище Python залишено без змін: ця інсталяція не має вбудованої основи, з якої його можна відтворити. Моделі, кеш завантажень і записи про встановлення очищено. Відтворіть це середовище самостійно, якщо проблема в застарілому пакеті всередині нього.",
+      importBusy:
+        "Уже виконується інше встановлення або імпорт. Спробуйте ще раз після завершення.",
+      importNoSpace: "На сервері недостатньо місця на диску для цього пакета.",
     },
     about: {
       heading: "Про програму",
@@ -5200,6 +5216,11 @@ export const uk: TranslationKeys = {
     passwordNeedsDigit: "Пароль має містити цифру.",
     passwordNeedsSpecial: "Пароль має містити спеціальний символ.",
     tooManyRequests: "Забагато спроб. Зачекайте хвилину й спробуйте ще раз.",
+    escalationDenied: "Для цього потрібно більше прав, ніж має ваша роль.",
+    featureNotLicensed: "Для цього потрібна корпоративна ліцензія.",
+    sessionEnded: "Ваш сеанс завершився. Увійдіть знову.",
+    forbidden: "У вас немає дозволу на цю дію.",
+    invalidSetting: "Неприпустиме значення параметра «{setting}».",
   },
   sidebar: {
     sponsor: "Підтримайте нас",

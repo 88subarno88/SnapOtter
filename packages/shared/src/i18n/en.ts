@@ -4441,8 +4441,6 @@ export const en = {
       newPasswordPlaceholder: "New Password",
       confirmPasswordPlaceholder: "Confirm New Password",
       passwordsMismatch: "Passwords do not match",
-      passwordTooShort:
-        "Password must be at least 8 characters with uppercase, lowercase, and a number",
       changeSuccess: "Password changed successfully",
       changeFailed: "Failed to change password",
       currentPasswordIncorrect: "Current password is incorrect",
@@ -4501,6 +4499,11 @@ export const en = {
       securitySettingsSaved: "Security settings saved",
       securitySettingsFailed: "Failed to save security settings",
       adminSettingsLoadFailed: "Couldn't load the security settings.",
+      twoFactorStateChanged:
+        "Two-factor authentication changed in another window. Reload and try again.",
+      twoFactorUnreadable:
+        "Your two-factor settings can't be read on the server. Ask an administrator.",
+      ssoNeedsProvider: "SSO enforcement needs an OIDC or SAML provider set up first.",
     },
     people: {
       heading: "People",
@@ -4556,6 +4559,11 @@ export const en = {
         "Copy this password now. You won't be able to see it after creating the user.",
       memberCount: "{count} member",
       memberCountPlural: "{count} members",
+      usernameTaken: "That username is already taken",
+      lastAdmin: "There must always be at least one admin",
+      cannotDeleteSelf: "Cannot delete your own account",
+      usernameInvalid:
+        "Username must be 3 to 50 characters, using only a-z, A-Z, 0-9, dots, hyphens and underscores",
     },
     teams: {
       heading: "Teams",
@@ -4592,6 +4600,7 @@ export const en = {
       teamRetentionHoursDesc:
         "Processing file retention for this team. Leave empty to use global default.",
       quotaSaved: "Team settings saved",
+      quotaSaveFailed: "Failed to save team settings",
     },
     roles: {
       heading: "Roles",
@@ -4631,6 +4640,9 @@ export const en = {
         teams: "Teams",
         system: "System",
       },
+      nameInvalid:
+        "Role name must be 2 to 30 characters, using only a-z, 0-9, hyphens and underscores",
+      permissionsRequired: "Choose at least one permission",
     },
     auditLog: {
       heading: "Audit Log",
@@ -4750,6 +4762,8 @@ export const en = {
       resetFailed: "Reset failed: {error}",
       resetVenvKept:
         "The shared Python environment was left in place: this install has no packaged base to rebuild it from. Models, the download cache and the install records were cleared. Recreate that environment yourself if a stale package in it is the problem.",
+      importBusy: "Another install or import is already running. Try again when it finishes.",
+      importNoSpace: "The server doesn't have enough disk space for this bundle.",
     },
     fileManagement: {
       title: "File Management",
@@ -5127,6 +5141,11 @@ export const en = {
     passwordNeedsDigit: "Password must contain a number.",
     passwordNeedsSpecial: "Password must contain a special character.",
     tooManyRequests: "Too many attempts. Wait a minute and try again.",
+    escalationDenied: "That needs more access than your role has.",
+    featureNotLicensed: "This needs an enterprise license.",
+    sessionEnded: "Your session has ended. Sign in again.",
+    forbidden: "You don't have permission to do that.",
+    invalidSetting: "Invalid value for {setting}.",
   },
   sidebar: {
     tools: "Tools",

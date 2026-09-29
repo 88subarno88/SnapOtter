@@ -4495,7 +4495,6 @@ export const vi: TranslationKeys = {
       newPasswordPlaceholder: "Mật khẩu mới",
       confirmPasswordPlaceholder: "Xác nhận mật khẩu mới",
       passwordsMismatch: "Mật khẩu không khớp",
-      passwordTooShort: "Mật khẩu phải có ít nhất 4 ký tự",
       changeSuccess: "Đã đổi mật khẩu thành công",
       changeFailed: "Đổi mật khẩu thất bại",
       currentPasswordIncorrect: "Mật khẩu hiện tại không đúng",
@@ -4553,6 +4552,11 @@ export const vi: TranslationKeys = {
       securitySettingsSaved: "Đã lưu cài đặt bảo mật",
       securitySettingsFailed: "Không thể lưu cài đặt bảo mật",
       adminSettingsLoadFailed: "Không thể tải cài đặt bảo mật.",
+      twoFactorStateChanged:
+        "Xác thực hai yếu tố đã thay đổi ở cửa sổ khác. Hãy tải lại rồi thử lại.",
+      twoFactorUnreadable:
+        "Máy chủ không đọc được cài đặt xác thực hai yếu tố của bạn. Hãy liên hệ quản trị viên.",
+      ssoNeedsProvider: "Để bắt buộc SSO, trước tiên hãy thiết lập nhà cung cấp OIDC hoặc SAML.",
     },
     people: {
       heading: "Thành viên",
@@ -4609,6 +4613,11 @@ export const vi: TranslationKeys = {
         "Sao chép mật khẩu này ngay bây giờ. Bạn sẽ không thể xem lại sau khi tạo người dùng.",
       memberCount: "{count} thành viên",
       memberCountPlural: "{count} thành viên",
+      usernameTaken: "Tên người dùng này đã được sử dụng",
+      lastAdmin: "Luôn phải có ít nhất một quản trị viên",
+      cannotDeleteSelf: "Không thể xóa tài khoản của chính bạn",
+      usernameInvalid:
+        "Tên người dùng phải dài từ 3 đến 50 ký tự và chỉ dùng a-z, A-Z, 0-9, dấu chấm, dấu gạch ngang và dấu gạch dưới",
     },
     teams: {
       heading: "Nhóm",
@@ -4646,6 +4655,7 @@ export const vi: TranslationKeys = {
       teamRetentionHoursDesc:
         "Thời gian lưu giữ tệp xử lý cho nhóm này. Để trống để dùng mặc định chung.",
       quotaSaved: "Đã lưu cài đặt nhóm",
+      quotaSaveFailed: "Lưu cài đặt nhóm thất bại",
     },
     roles: {
       heading: "Vai trò",
@@ -4685,6 +4695,9 @@ export const vi: TranslationKeys = {
         teams: "Nhóm",
         system: "Hệ thống",
       },
+      nameInvalid:
+        "Tên vai trò phải dài từ 2 đến 30 ký tự và chỉ dùng a-z, 0-9, dấu gạch ngang và dấu gạch dưới",
+      permissionsRequired: "Chọn ít nhất một quyền",
     },
     auditLog: {
       heading: "Nhật ký kiểm tra",
@@ -4822,6 +4835,8 @@ export const vi: TranslationKeys = {
       resetFailed: "Đặt lại thất bại: {error}",
       resetVenvKept:
         "Môi trường Python dùng chung được giữ nguyên: bản cài đặt này không có nền tảng đi kèm để dựng lại nó. Các mô hình, bộ nhớ đệm tải xuống và bản ghi cài đặt đã được xóa. Hãy tự tạo lại môi trường đó nếu một gói cũ bên trong là nguyên nhân.",
+      importBusy: "Một lượt cài đặt hoặc nhập khác đang chạy. Hãy thử lại khi nó hoàn tất.",
+      importNoSpace: "Máy chủ không đủ dung lượng đĩa cho gói này.",
     },
     about: {
       heading: "Giới thiệu",
@@ -5182,6 +5197,11 @@ export const vi: TranslationKeys = {
     passwordNeedsDigit: "Mật khẩu phải chứa một chữ số.",
     passwordNeedsSpecial: "Mật khẩu phải chứa một ký tự đặc biệt.",
     tooManyRequests: "Quá nhiều lần thử. Hãy đợi một phút rồi thử lại.",
+    escalationDenied: "Việc này cần quyền truy cập cao hơn vai trò của bạn.",
+    featureNotLicensed: "Tính năng này cần giấy phép doanh nghiệp.",
+    sessionEnded: "Phiên của bạn đã kết thúc. Hãy đăng nhập lại.",
+    forbidden: "Bạn không có quyền làm việc này.",
+    invalidSetting: "Giá trị không hợp lệ cho {setting}.",
   },
   sidebar: {
     sponsor: "Ủng hộ chúng tôi",

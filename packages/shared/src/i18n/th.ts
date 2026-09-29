@@ -4454,7 +4454,6 @@ export const th: TranslationKeys = {
       newPasswordPlaceholder: "รหัสผ่านใหม่",
       confirmPasswordPlaceholder: "ยืนยันรหัสผ่านใหม่",
       passwordsMismatch: "รหัสผ่านไม่ตรงกัน",
-      passwordTooShort: "รหัสผ่านต้องมีอย่างน้อย 4 ตัวอักษร",
       changeSuccess: "เปลี่ยนรหัสผ่านสำเร็จ",
       changeFailed: "เปลี่ยนรหัสผ่านล้มเหลว",
       currentPasswordIncorrect: "รหัสผ่านปัจจุบันไม่ถูกต้อง",
@@ -4509,6 +4508,9 @@ export const th: TranslationKeys = {
       securitySettingsSaved: "บันทึกการตั้งค่าความปลอดภัยแล้ว",
       securitySettingsFailed: "บันทึกการตั้งค่าความปลอดภัยไม่สำเร็จ",
       adminSettingsLoadFailed: "โหลดการตั้งค่าความปลอดภัยไม่สำเร็จ",
+      twoFactorStateChanged: "การยืนยันตัวตนสองปัจจัยถูกเปลี่ยนในหน้าต่างอื่น โหลดใหม่แล้วลองอีกครั้ง",
+      twoFactorUnreadable: "เซิร์ฟเวอร์อ่านการตั้งค่าการยืนยันตัวตนสองปัจจัยของคุณไม่ได้ ติดต่อผู้ดูแลระบบ",
+      ssoNeedsProvider: "ต้องตั้งค่าผู้ให้บริการ OIDC หรือ SAML ก่อนจึงจะบังคับใช้ SSO ได้",
     },
     people: {
       heading: "สมาชิก",
@@ -4563,6 +4565,10 @@ export const th: TranslationKeys = {
       copyPasswordWarning: "คัดลอกรหัสผ่านนี้ตอนนี้ คุณจะไม่สามารถดูได้หลังจากสร้างผู้ใช้",
       memberCount: "{count} สมาชิก",
       memberCountPlural: "{count} สมาชิก",
+      usernameTaken: "ชื่อผู้ใช้นี้ถูกใช้แล้ว",
+      lastAdmin: "ต้องมีผู้ดูแลระบบอย่างน้อยหนึ่งคนเสมอ",
+      cannotDeleteSelf: "ไม่สามารถลบบัญชีของตัวเองได้",
+      usernameInvalid: "ชื่อผู้ใช้ต้องมี 3 ถึง 50 อักขระ และใช้ได้เฉพาะ a-z, A-Z, 0-9, จุด, ขีดกลาง และขีดล่าง",
     },
     teams: {
       heading: "ทีม",
@@ -4598,6 +4604,7 @@ export const th: TranslationKeys = {
       teamRetentionHours: "ระยะเวลาเก็บรักษา (ชั่วโมง)",
       teamRetentionHoursDesc: "ระยะเวลาเก็บรักษาไฟล์ประมวลผลสำหรับทีมนี้ เว้นว่างไว้เพื่อใช้ค่าเริ่มต้น",
       quotaSaved: "บันทึกการตั้งค่าทีมแล้ว",
+      quotaSaveFailed: "บันทึกการตั้งค่าทีมไม่สำเร็จ",
     },
     roles: {
       heading: "บทบาท",
@@ -4637,6 +4644,8 @@ export const th: TranslationKeys = {
         teams: "ทีม",
         system: "ระบบ",
       },
+      nameInvalid: "ชื่อบทบาทต้องมี 2 ถึง 30 อักขระ และใช้ได้เฉพาะ a-z, 0-9, ขีดกลาง และขีดล่าง",
+      permissionsRequired: "เลือกสิทธิ์อย่างน้อยหนึ่งรายการ",
     },
     auditLog: {
       heading: "บันทึกการตรวจสอบ",
@@ -4772,6 +4781,8 @@ export const th: TranslationKeys = {
       resetFailed: "รีเซ็ตล้มเหลว: {error}",
       resetVenvKept:
         "สภาพแวดล้อม Python ที่ใช้ร่วมกันถูกเก็บไว้ตามเดิม เนื่องจากการติดตั้งนี้ไม่มีชุดพื้นฐานที่มาพร้อมกันสำหรับสร้างขึ้นใหม่ โมเดล แคชการดาวน์โหลด และบันทึกการติดตั้งถูกล้างแล้ว หากแพ็กเกจเก่าในนั้นคือต้นเหตุ ให้สร้างสภาพแวดล้อมนั้นขึ้นใหม่ด้วยตนเอง",
+      importBusy: "มีการติดตั้งหรือนำเข้าอื่นกำลังทำงานอยู่ ลองอีกครั้งเมื่อเสร็จแล้ว",
+      importNoSpace: "เซิร์ฟเวอร์มีพื้นที่ดิสก์ไม่พอสำหรับชุดข้อมูลนี้",
     },
     about: {
       heading: "เกี่ยวกับ",
@@ -5125,6 +5136,11 @@ export const th: TranslationKeys = {
     passwordNeedsDigit: "รหัสผ่านต้องมีตัวเลข",
     passwordNeedsSpecial: "รหัสผ่านต้องมีอักขระพิเศษ",
     tooManyRequests: "ลองหลายครั้งเกินไป รอหนึ่งนาทีแล้วลองอีกครั้ง",
+    escalationDenied: "การดำเนินการนี้ต้องใช้สิทธิ์มากกว่าที่บทบาทของคุณมี",
+    featureNotLicensed: "ต้องใช้ใบอนุญาตระดับองค์กร",
+    sessionEnded: "เซสชันของคุณสิ้นสุดแล้ว ลงชื่อเข้าใช้อีกครั้ง",
+    forbidden: "คุณไม่มีสิทธิ์ทำสิ่งนี้",
+    invalidSetting: "ค่าของ {setting} ไม่ถูกต้อง",
   },
   sidebar: {
     sponsor: "สนับสนุนเรา",

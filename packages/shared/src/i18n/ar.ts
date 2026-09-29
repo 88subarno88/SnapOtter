@@ -4476,7 +4476,6 @@ export const ar: TranslationKeys = {
       newPasswordPlaceholder: "كلمة المرور الجديدة",
       confirmPasswordPlaceholder: "تأكيد كلمة المرور الجديدة",
       passwordsMismatch: "كلمتا المرور غير متطابقتين",
-      passwordTooShort: "يجب أن تتكون كلمة المرور من 4 أحرف على الأقل",
       changeSuccess: "تم تغيير كلمة المرور بنجاح",
       changeFailed: "فشل تغيير كلمة المرور",
       currentPasswordIncorrect: "كلمة المرور الحالية غير صحيحة",
@@ -4531,6 +4530,10 @@ export const ar: TranslationKeys = {
       securitySettingsSaved: "تم حفظ إعدادات الأمان",
       securitySettingsFailed: "فشل حفظ إعدادات الأمان",
       adminSettingsLoadFailed: "تعذّر تحميل إعدادات الأمان.",
+      twoFactorStateChanged: "تغيّرت المصادقة الثنائية في نافذة أخرى. أعد التحميل ثم حاول مرة أخرى.",
+      twoFactorUnreadable:
+        "تعذّر على الخادم قراءة إعدادات المصادقة الثنائية الخاصة بك. تواصل مع المسؤول.",
+      ssoNeedsProvider: "يتطلب فرض SSO إعداد موفّر OIDC أو SAML أولًا.",
     },
     people: {
       heading: "الأعضاء",
@@ -4585,6 +4588,11 @@ export const ar: TranslationKeys = {
       copyPasswordWarning: "انسخ كلمة المرور الآن. لن تتمكن من رؤيتها بعد إنشاء المستخدم.",
       memberCount: "{count} عضو",
       memberCountPlural: "{count} أعضاء",
+      usernameTaken: "اسم المستخدم هذا مستخدم بالفعل",
+      lastAdmin: "يجب أن يبقى مسؤول واحد على الأقل دائمًا",
+      cannotDeleteSelf: "لا يمكنك حذف حسابك الخاص",
+      usernameInvalid:
+        "يجب أن يتكون اسم المستخدم من 3 إلى 50 حرفًا، باستخدام a-z وA-Z و0-9 والنقاط والشرطات والشرطات السفلية فقط",
     },
     teams: {
       heading: "الفرق",
@@ -4621,6 +4629,7 @@ export const ar: TranslationKeys = {
       teamRetentionHoursDesc:
         "مدة الاحتفاظ بملفات المعالجة لهذا الفريق. اتركه فارغًا لاستخدام الإعداد الافتراضي.",
       quotaSaved: "تم حفظ إعدادات الفريق",
+      quotaSaveFailed: "فشل حفظ إعدادات الفريق",
     },
     roles: {
       heading: "الأدوار",
@@ -4660,6 +4669,9 @@ export const ar: TranslationKeys = {
         teams: "الفرق",
         system: "النظام",
       },
+      nameInvalid:
+        "يجب أن يتكون اسم الدور من 2 إلى 30 حرفًا، باستخدام a-z و0-9 والشرطات والشرطات السفلية فقط",
+      permissionsRequired: "اختر صلاحية واحدة على الأقل",
     },
     auditLog: {
       heading: "سجل التدقيق",
@@ -4797,6 +4809,8 @@ export const ar: TranslationKeys = {
       resetFailed: "فشلت إعادة التعيين: {error}",
       resetVenvKept:
         "تم الإبقاء على بيئة Python المشتركة: لا تتضمن هذه التثبيتة قاعدة مرفقة يمكن إعادة بنائها منها. تم مسح النماذج وذاكرة التنزيل المؤقتة وسجلات التثبيت. أعد إنشاء تلك البيئة بنفسك إذا كانت حزمة قديمة بداخلها هي المشكلة.",
+      importBusy: "هناك عملية تثبيت أو استيراد أخرى قيد التشغيل. حاول مرة أخرى بعد انتهائها.",
+      importNoSpace: "لا توجد مساحة كافية على قرص الخادم لهذه الحزمة.",
     },
     about: {
       heading: "حول",
@@ -5154,6 +5168,11 @@ export const ar: TranslationKeys = {
     passwordNeedsDigit: "يجب أن تحتوي كلمة المرور على رقم.",
     passwordNeedsSpecial: "يجب أن تحتوي كلمة المرور على حرف خاص.",
     tooManyRequests: "محاولات كثيرة جدًا. انتظر دقيقة ثم حاول مرة أخرى.",
+    escalationDenied: "يتطلب هذا صلاحيات أعلى من صلاحيات دورك.",
+    featureNotLicensed: "يتطلب هذا ترخيص المؤسسات.",
+    sessionEnded: "انتهت جلستك. سجّل الدخول مرة أخرى.",
+    forbidden: "ليست لديك صلاحية للقيام بذلك.",
+    invalidSetting: "قيمة غير صالحة لـ {setting}.",
   },
   sidebar: {
     sponsor: "ادعمنا",

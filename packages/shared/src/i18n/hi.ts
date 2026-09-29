@@ -4304,7 +4304,6 @@ export const hi: TranslationKeys = {
       newPasswordPlaceholder: "नया पासवर्ड",
       confirmPasswordPlaceholder: "नए पासवर्ड की पुष्टि करें",
       passwordsMismatch: "पासवर्ड मेल नहीं खाते",
-      passwordTooShort: "पासवर्ड कम से कम 4 अक्षर का होना चाहिए",
       changeSuccess: "पासवर्ड सफलतापूर्वक बदला गया",
       changeFailed: "पासवर्ड बदलने में विफल",
       currentPasswordIncorrect: "मौजूदा पासवर्ड गलत है",
@@ -4360,6 +4359,11 @@ export const hi: TranslationKeys = {
       securitySettingsSaved: "सुरक्षा सेटिंग्स सहेजी गईं",
       securitySettingsFailed: "सुरक्षा सेटिंग्स सहेजना विफल",
       adminSettingsLoadFailed: "सुरक्षा सेटिंग्स लोड नहीं हो सकीं।",
+      twoFactorStateChanged:
+        "द्वि-कारक प्रमाणीकरण किसी दूसरी विंडो में बदला गया। रीलोड करके फिर से प्रयास करें।",
+      twoFactorUnreadable:
+        "सर्वर आपकी द्वि-कारक प्रमाणीकरण सेटिंग्स नहीं पढ़ पा रहा है। किसी एडमिन से संपर्क करें।",
+      ssoNeedsProvider: "SSO प्रवर्तन के लिए पहले OIDC या SAML प्रदाता सेट करें।",
     },
     people: {
       heading: "सदस्य",
@@ -4414,6 +4418,11 @@ export const hi: TranslationKeys = {
       copyPasswordWarning: "इस पासवर्ड को अभी कॉपी करें। उपयोगकर्ता बनाने के बाद आप इसे नहीं देख पाएंगे।",
       memberCount: "{count} सदस्य",
       memberCountPlural: "{count} सदस्य",
+      usernameTaken: "यह उपयोगकर्ता नाम पहले से लिया जा चुका है",
+      lastAdmin: "कम से कम एक एडमिन हमेशा होना चाहिए",
+      cannotDeleteSelf: "अपना खुद का खाता नहीं हटा सकते",
+      usernameInvalid:
+        "उपयोगकर्ता नाम 3 से 50 वर्णों का होना चाहिए और उसमें केवल a-z, A-Z, 0-9, बिंदु, हाइफ़न और अंडरस्कोर हो सकते हैं",
     },
     teams: {
       heading: "टीमें",
@@ -4449,6 +4458,7 @@ export const hi: TranslationKeys = {
       teamRetentionHours: "अवधारण (घंटे)",
       teamRetentionHoursDesc: "इस टीम के लिए प्रोसेसिंग फ़ाइल अवधारण। वैश्विक डिफ़ॉल्ट के लिए खाली छोड़ें।",
       quotaSaved: "टीम सेटिंग्स सहेजी गईं",
+      quotaSaveFailed: "टीम सेटिंग्स सहेजना विफल",
     },
     roles: {
       heading: "भूमिकाएं",
@@ -4488,6 +4498,9 @@ export const hi: TranslationKeys = {
         teams: "टीमें",
         system: "सिस्टम",
       },
+      nameInvalid:
+        "भूमिका का नाम 2 से 30 वर्णों का होना चाहिए और उसमें केवल a-z, 0-9, हाइफ़न और अंडरस्कोर हो सकते हैं",
+      permissionsRequired: "कम से कम एक अनुमति चुनें",
     },
     auditLog: {
       heading: "ऑडिट लॉग",
@@ -4623,6 +4636,8 @@ export const hi: TranslationKeys = {
       resetFailed: "रीसेट विफल: {error}",
       resetVenvKept:
         "साझा Python परिवेश को यथावत छोड़ दिया गया: इस इंस्टॉलेशन में उसे दोबारा बनाने के लिए कोई शामिल आधार नहीं है। मॉडल, डाउनलोड कैश और इंस्टॉल रिकॉर्ड मिटा दिए गए। यदि उसमें मौजूद कोई पुराना पैकेज ही समस्या है, तो वह परिवेश स्वयं दोबारा बनाएं।",
+      importBusy: "कोई दूसरा इंस्टॉल या आयात पहले से चल रहा है। उसके पूरा होने पर फिर से प्रयास करें।",
+      importNoSpace: "इस बंडल के लिए सर्वर पर पर्याप्त डिस्क स्थान नहीं है।",
     },
     about: {
       heading: "जानकारी",
@@ -4980,6 +4995,11 @@ export const hi: TranslationKeys = {
     passwordNeedsDigit: "पासवर्ड में एक संख्या होनी चाहिए।",
     passwordNeedsSpecial: "पासवर्ड में एक विशेष वर्ण होना चाहिए।",
     tooManyRequests: "बहुत अधिक प्रयास। एक मिनट रुककर फिर से प्रयास करें।",
+    escalationDenied: "इसके लिए आपकी भूमिका से अधिक पहुंच चाहिए।",
+    featureNotLicensed: "इसके लिए एंटरप्राइज़ लाइसेंस आवश्यक है।",
+    sessionEnded: "आपका सत्र समाप्त हो गया है। फिर से साइन इन करें।",
+    forbidden: "आपको ऐसा करने की अनुमति नहीं है।",
+    invalidSetting: "{setting} के लिए अमान्य मान।",
   },
   sidebar: {
     sponsor: "हमारा समर्थन करें",

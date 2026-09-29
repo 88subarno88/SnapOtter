@@ -4517,7 +4517,6 @@ export const nl: TranslationKeys = {
       newPasswordPlaceholder: "Nieuw wachtwoord",
       confirmPasswordPlaceholder: "Nieuw wachtwoord bevestigen",
       passwordsMismatch: "Wachtwoorden komen niet overeen",
-      passwordTooShort: "Wachtwoord moet minimaal 4 tekens lang zijn",
       changeSuccess: "Wachtwoord succesvol gewijzigd",
       changeFailed: "Wachtwoord wijzigen mislukt",
       currentPasswordIncorrect: "Huidig wachtwoord is onjuist",
@@ -4577,6 +4576,12 @@ export const nl: TranslationKeys = {
       securitySettingsSaved: "Beveiligingsinstellingen opgeslagen",
       securitySettingsFailed: "Beveiligingsinstellingen opslaan mislukt",
       adminSettingsLoadFailed: "Beveiligingsinstellingen laden mislukt.",
+      twoFactorStateChanged:
+        "Tweefactorauthenticatie is in een ander venster gewijzigd. Laad opnieuw en probeer het nog eens.",
+      twoFactorUnreadable:
+        "De server kan je instellingen voor tweefactorauthenticatie niet lezen. Neem contact op met een beheerder.",
+      ssoNeedsProvider:
+        "Om SSO af te dwingen moet eerst een OIDC- of SAML-provider zijn ingesteld.",
     },
     people: {
       heading: "Personen",
@@ -4632,6 +4637,11 @@ export const nl: TranslationKeys = {
         "Kopieer dit wachtwoord nu. U kunt het niet meer zien na het aanmaken van de gebruiker.",
       memberCount: "{count} lid",
       memberCountPlural: "{count} leden",
+      usernameTaken: "Die gebruikersnaam is al in gebruik",
+      lastAdmin: "Er moet altijd minstens één beheerder zijn",
+      cannotDeleteSelf: "Je kunt je eigen account niet verwijderen",
+      usernameInvalid:
+        "Een gebruikersnaam moet 3 tot 50 tekens lang zijn en mag alleen a-z, A-Z, 0-9, punten, koppeltekens en onderstrepingstekens bevatten",
     },
     teams: {
       heading: "Teams",
@@ -4668,6 +4678,7 @@ export const nl: TranslationKeys = {
       teamRetentionHoursDesc:
         "Bewaartermijn voor verwerkingsbestanden van dit team. Laat leeg voor de standaardwaarde.",
       quotaSaved: "Teaminstellingen opgeslagen",
+      quotaSaveFailed: "Teaminstellingen opslaan mislukt",
     },
     roles: {
       heading: "Rollen",
@@ -4708,6 +4719,9 @@ export const nl: TranslationKeys = {
         teams: "Teams",
         system: "Systeem",
       },
+      nameInvalid:
+        "Een rolnaam moet 2 tot 30 tekens lang zijn en mag alleen a-z, 0-9, koppeltekens en onderstrepingstekens bevatten",
+      permissionsRequired: "Kies minstens één recht",
     },
     auditLog: {
       heading: "Auditlog",
@@ -4849,6 +4863,9 @@ export const nl: TranslationKeys = {
       resetFailed: "Resetten mislukt: {error}",
       resetVenvKept:
         "De gedeelde Python-omgeving is blijven staan: deze installatie heeft geen meegeleverde basis om die opnieuw op te bouwen. Modellen, de downloadcache en de installatiegegevens zijn gewist. Maak die omgeving zelf opnieuw aan als een verouderd pakket erin het probleem is.",
+      importBusy:
+        "Er loopt al een andere installatie of import. Probeer het opnieuw als die klaar is.",
+      importNoSpace: "De server heeft niet genoeg schijfruimte voor deze bundel.",
     },
     about: {
       heading: "Over",
@@ -5213,6 +5230,11 @@ export const nl: TranslationKeys = {
     passwordNeedsDigit: "Het wachtwoord moet een cijfer bevatten.",
     passwordNeedsSpecial: "Het wachtwoord moet een speciaal teken bevatten.",
     tooManyRequests: "Te veel pogingen. Wacht een minuut en probeer het opnieuw.",
+    escalationDenied: "Daarvoor heb je meer rechten nodig dan je rol heeft.",
+    featureNotLicensed: "Hiervoor is een enterprise-licentie nodig.",
+    sessionEnded: "Je sessie is verlopen. Log opnieuw in.",
+    forbidden: "Je hebt geen toestemming om dat te doen.",
+    invalidSetting: "Ongeldige waarde voor {setting}.",
   },
   sidebar: {
     sponsor: "Steun ons",

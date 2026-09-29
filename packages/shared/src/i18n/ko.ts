@@ -4430,7 +4430,6 @@ export const ko: TranslationKeys = {
       newPasswordPlaceholder: "새 비밀번호",
       confirmPasswordPlaceholder: "새 비밀번호 확인",
       passwordsMismatch: "비밀번호가 일치하지 않습니다",
-      passwordTooShort: "비밀번호는 4자 이상이어야 합니다",
       changeSuccess: "비밀번호가 변경되었습니다",
       changeFailed: "비밀번호 변경에 실패했습니다",
       currentPasswordIncorrect: "현재 비밀번호가 올바르지 않습니다",
@@ -4487,6 +4486,10 @@ export const ko: TranslationKeys = {
       securitySettingsSaved: "보안 설정이 저장되었습니다",
       securitySettingsFailed: "보안 설정 저장에 실패했습니다",
       adminSettingsLoadFailed: "보안 설정을 불러오지 못했습니다.",
+      twoFactorStateChanged:
+        "다른 창에서 2단계 인증이 변경되었습니다. 새로고침한 후 다시 시도하세요.",
+      twoFactorUnreadable: "서버에서 2단계 인증 설정을 읽을 수 없습니다. 관리자에게 문의하세요.",
+      ssoNeedsProvider: "SSO를 적용하려면 먼저 OIDC 또는 SAML 공급자를 설정해야 합니다.",
     },
     people: {
       heading: "멤버",
@@ -4541,6 +4544,11 @@ export const ko: TranslationKeys = {
       copyPasswordWarning: "지금 이 비밀번호를 복사하세요. 사용자 생성 후에는 확인할 수 없습니다.",
       memberCount: "멤버 {count}명",
       memberCountPlural: "멤버 {count}명",
+      usernameTaken: "이미 사용 중인 사용자 이름입니다",
+      lastAdmin: "관리자는 항상 한 명 이상 있어야 합니다",
+      cannotDeleteSelf: "자신의 계정은 삭제할 수 없습니다",
+      usernameInvalid:
+        "사용자 이름은 3~50자여야 하며 a-z, A-Z, 0-9, 마침표, 하이픈, 밑줄만 사용할 수 있습니다",
     },
     teams: {
       heading: "팀",
@@ -4577,6 +4585,7 @@ export const ko: TranslationKeys = {
       teamRetentionHoursDesc:
         "이 팀의 처리 파일 보관 기간입니다. 전역 기본값을 사용하려면 비워 두세요.",
       quotaSaved: "팀 설정이 저장되었습니다",
+      quotaSaveFailed: "팀 설정 저장에 실패했습니다",
     },
     roles: {
       heading: "역할",
@@ -4617,6 +4626,8 @@ export const ko: TranslationKeys = {
         teams: "팀",
         system: "시스템",
       },
+      nameInvalid: "역할 이름은 2~30자여야 하며 a-z, 0-9, 하이픈, 밑줄만 사용할 수 있습니다",
+      permissionsRequired: "권한을 하나 이상 선택하세요",
     },
     auditLog: {
       heading: "감사 로그",
@@ -4754,6 +4765,8 @@ export const ko: TranslationKeys = {
       resetFailed: "재설정 실패: {error}",
       resetVenvKept:
         "공유 Python 환경은 그대로 두었습니다. 이 설치본에는 환경을 다시 만들 기본 패키지가 포함되어 있지 않습니다. 모델, 다운로드 캐시, 설치 기록은 삭제되었습니다. 환경 안의 오래된 패키지가 문제라면 해당 환경을 직접 다시 만드세요.",
+      importBusy: "다른 설치나 가져오기가 이미 진행 중입니다. 완료된 후 다시 시도하세요.",
+      importNoSpace: "서버에 이 번들을 위한 디스크 공간이 부족합니다.",
     },
     about: {
       heading: "정보",
@@ -5112,6 +5125,11 @@ export const ko: TranslationKeys = {
     passwordNeedsDigit: "비밀번호에 숫자를 포함해야 합니다.",
     passwordNeedsSpecial: "비밀번호에 특수 문자를 포함해야 합니다.",
     tooManyRequests: "시도 횟수가 너무 많습니다. 1분 후에 다시 시도하세요.",
+    escalationDenied: "이 작업에는 현재 역할보다 높은 권한이 필요합니다.",
+    featureNotLicensed: "엔터프라이즈 라이선스가 필요합니다.",
+    sessionEnded: "세션이 종료되었습니다. 다시 로그인하세요.",
+    forbidden: "이 작업을 할 권한이 없습니다.",
+    invalidSetting: "{setting} 값이 올바르지 않습니다.",
   },
   sidebar: {
     sponsor: "후원하기",
