@@ -4944,6 +4944,7 @@ export const id: TranslationKeys = {
     sidebarTitle: "Hampir selesai",
     sidebarDescription:
       "Atur kata sandi yang kuat untuk mengamankan akun Anda, lalu Anda siap memulai.",
+    sessionEnded: "Sesi Anda telah berakhir. Masuk lagi untuk mengubah kata sandi.",
   },
   automate: {
     title: "Otomasi",
@@ -5187,6 +5188,12 @@ export const id: TranslationKeys = {
     featureNotInstalledForTool:
       '{tool} memerlukan fitur "{feature}". Aktifkan di Pengaturan → Fitur AI.',
     featureNotInstalled: 'Fitur "{feature}" belum terpasang. Aktifkan di Pengaturan → Fitur AI.',
+    passwordTooShort: "Kata sandi minimal {minLength} karakter.",
+    passwordNeedsUppercase: "Kata sandi harus mengandung huruf besar.",
+    passwordNeedsLowercase: "Kata sandi harus mengandung huruf kecil.",
+    passwordNeedsDigit: "Kata sandi harus mengandung angka.",
+    passwordNeedsSpecial: "Kata sandi harus mengandung karakter khusus.",
+    tooManyRequests: "Terlalu banyak percobaan. Tunggu satu menit lalu coba lagi.",
   },
   sidebar: {
     sponsor: "Dukung kami",

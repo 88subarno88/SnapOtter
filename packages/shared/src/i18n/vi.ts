@@ -4933,6 +4933,7 @@ export const vi: TranslationKeys = {
     changeButton: "Đổi mật khẩu",
     sidebarTitle: "Sắp xong rồi",
     sidebarDescription: "Đặt mật khẩu mạnh để bảo mật tài khoản, sau đó bạn có thể sử dụng ngay.",
+    sessionEnded: "Phiên của bạn đã kết thúc. Hãy đăng nhập lại để đổi mật khẩu.",
   },
   automate: {
     title: "Tự động hóa",
@@ -5175,6 +5176,12 @@ export const vi: TranslationKeys = {
       '{tool} cần tính năng "{feature}". Hãy bật trong Cài đặt → Tính năng AI.',
     featureNotInstalled:
       'Tính năng "{feature}" chưa được cài đặt. Hãy bật trong Cài đặt → Tính năng AI.',
+    passwordTooShort: "Mật khẩu phải có ít nhất {minLength} ký tự.",
+    passwordNeedsUppercase: "Mật khẩu phải chứa một chữ cái viết hoa.",
+    passwordNeedsLowercase: "Mật khẩu phải chứa một chữ cái viết thường.",
+    passwordNeedsDigit: "Mật khẩu phải chứa một chữ số.",
+    passwordNeedsSpecial: "Mật khẩu phải chứa một ký tự đặc biệt.",
+    tooManyRequests: "Quá nhiều lần thử. Hãy đợi một phút rồi thử lại.",
   },
   sidebar: {
     sponsor: "Ủng hộ chúng tôi",

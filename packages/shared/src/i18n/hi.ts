@@ -4733,6 +4733,7 @@ export const hi: TranslationKeys = {
     changeButton: "पासवर्ड बदलें",
     sidebarTitle: "लगभग हो गया",
     sidebarDescription: "अपने अकाउंट को सुरक्षित करने के लिए एक मजबूत पासवर्ड सेट करें, फिर आप तैयार हैं।",
+    sessionEnded: "आपका सत्र समाप्त हो गया है। पासवर्ड बदलने के लिए फिर से साइन इन करें।",
   },
   automate: {
     title: "ऑटोमेट",
@@ -4973,6 +4974,12 @@ export const hi: TranslationKeys = {
     featureNotInstalledForTool:
       '{tool} के लिए "{feature}" फीचर ज़रूरी है। इसे सेटिंग्स → AI फीचर्स में सक्रिय करें।',
     featureNotInstalled: '"{feature}" फीचर इंस्टॉल नहीं है। इसे सेटिंग्स → AI फीचर्स में सक्रिय करें।',
+    passwordTooShort: "पासवर्ड कम से कम {minLength} वर्णों का होना चाहिए।",
+    passwordNeedsUppercase: "पासवर्ड में एक अपरकेस अक्षर होना चाहिए।",
+    passwordNeedsLowercase: "पासवर्ड में एक लोअरकेस अक्षर होना चाहिए।",
+    passwordNeedsDigit: "पासवर्ड में एक संख्या होनी चाहिए।",
+    passwordNeedsSpecial: "पासवर्ड में एक विशेष वर्ण होना चाहिए।",
+    tooManyRequests: "बहुत अधिक प्रयास। एक मिनट रुककर फिर से प्रयास करें।",
   },
   sidebar: {
     sponsor: "हमारा समर्थन करें",

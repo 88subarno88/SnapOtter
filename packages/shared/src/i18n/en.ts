@@ -4878,6 +4878,7 @@ export const en = {
     changeButton: "Change password",
     sidebarTitle: "Hello from the otter side!",
     sidebarDescription: "Set a strong password to secure your account, then you're good to go.",
+    sessionEnded: "Your session has ended. Sign in again to change your password.",
   },
   automate: {
     title: "Automate",
@@ -5120,6 +5121,12 @@ export const en = {
       '{tool} requires the "{feature}" feature. Enable it in Settings → AI Features.',
     featureNotInstalled:
       'The "{feature}" feature is not installed. Enable it in Settings → AI Features.',
+    passwordTooShort: "Password must be at least {minLength} characters.",
+    passwordNeedsUppercase: "Password must contain an uppercase letter.",
+    passwordNeedsLowercase: "Password must contain a lowercase letter.",
+    passwordNeedsDigit: "Password must contain a number.",
+    passwordNeedsSpecial: "Password must contain a special character.",
+    tooManyRequests: "Too many attempts. Wait a minute and try again.",
   },
   sidebar: {
     tools: "Tools",

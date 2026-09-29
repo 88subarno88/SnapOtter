@@ -4953,6 +4953,7 @@ export const tr: TranslationKeys = {
     sidebarTitle: "Neredeyse tamam",
     sidebarDescription:
       "Hesabınızı güvence altına almak için güçlü bir parola belirleyin, ardından hazırsınız.",
+    sessionEnded: "Oturumunuz sona erdi. Parolanızı değiştirmek için yeniden giriş yapın.",
   },
   automate: {
     title: "Otomatikleştir",
@@ -5197,6 +5198,12 @@ export const tr: TranslationKeys = {
       '{tool} için "{feature}" özelliği gerekiyor. Ayarlar → AI Özellikleri bölümünden etkinleştirin.',
     featureNotInstalled:
       '"{feature}" özelliği yüklü değil. Ayarlar → AI Özellikleri bölümünden etkinleştirin.',
+    passwordTooShort: "Parola en az {minLength} karakter olmalıdır.",
+    passwordNeedsUppercase: "Parola bir büyük harf içermelidir.",
+    passwordNeedsLowercase: "Parola bir küçük harf içermelidir.",
+    passwordNeedsDigit: "Parola bir rakam içermelidir.",
+    passwordNeedsSpecial: "Parola bir özel karakter içermelidir.",
+    tooManyRequests: "Çok fazla deneme. Bir dakika bekleyip tekrar deneyin.",
   },
   sidebar: {
     sponsor: "Bize destek olun",

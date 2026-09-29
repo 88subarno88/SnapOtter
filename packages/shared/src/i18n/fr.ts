@@ -4976,6 +4976,7 @@ export const fr: TranslationKeys = {
     sidebarTitle: "Presque fini",
     sidebarDescription:
       "Définissez un mot de passe fort pour sécuriser votre compte, puis vous serez prêt.",
+    sessionEnded: "Votre session a expiré. Reconnectez-vous pour changer votre mot de passe.",
   },
   automate: {
     title: "Automatiser",
@@ -5220,6 +5221,12 @@ export const fr: TranslationKeys = {
       "{tool} nécessite la fonctionnalité « {feature} ». Activez-la dans Paramètres → Fonctionnalités AI.",
     featureNotInstalled:
       "La fonctionnalité « {feature} » n'est pas installée. Activez-la dans Paramètres → Fonctionnalités AI.",
+    passwordTooShort: "Le mot de passe doit contenir au moins {minLength} caractères.",
+    passwordNeedsUppercase: "Le mot de passe doit contenir une lettre majuscule.",
+    passwordNeedsLowercase: "Le mot de passe doit contenir une lettre minuscule.",
+    passwordNeedsDigit: "Le mot de passe doit contenir un chiffre.",
+    passwordNeedsSpecial: "Le mot de passe doit contenir un caractère spécial.",
+    tooManyRequests: "Trop de tentatives. Patientez une minute puis réessayez.",
   },
   sidebar: {
     sponsor: "Soutenez-nous",

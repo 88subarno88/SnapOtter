@@ -4657,6 +4657,7 @@ export const zhCN: TranslationKeys = {
     changeButton: "修改密码",
     sidebarTitle: "快要完成了",
     sidebarDescription: "设置一个强密码来保护您的账号，然后就可以开始使用了。",
+    sessionEnded: "你的会话已结束。请重新登录以更改密码。",
   },
   automate: {
     title: "自动化",
@@ -4894,6 +4895,12 @@ export const zhCN: TranslationKeys = {
     fileTooLarge: "此文件超过了服务器的上传大小限制。",
     featureNotInstalledForTool: "{tool}需要「{feature}」功能。请在 设置 → AI 功能 中启用。",
     featureNotInstalled: "「{feature}」功能未安装。请在 设置 → AI 功能 中启用。",
+    passwordTooShort: "密码长度至少为 {minLength} 个字符。",
+    passwordNeedsUppercase: "密码必须包含一个大写字母。",
+    passwordNeedsLowercase: "密码必须包含一个小写字母。",
+    passwordNeedsDigit: "密码必须包含一个数字。",
+    passwordNeedsSpecial: "密码必须包含一个特殊字符。",
+    tooManyRequests: "尝试次数过多。请等待一分钟后重试。",
   },
   sidebar: {
     sponsor: "支持我们",

@@ -4963,6 +4963,7 @@ export const nl: TranslationKeys = {
     sidebarTitle: "Bijna klaar",
     sidebarDescription:
       "Stel een sterk wachtwoord in om je account te beveiligen, dan ben je er klaar voor.",
+    sessionEnded: "Je sessie is verlopen. Log opnieuw in om je wachtwoord te wijzigen.",
   },
   automate: {
     title: "Automatiseren",
@@ -5206,6 +5207,12 @@ export const nl: TranslationKeys = {
       '{tool} heeft de functie "{feature}" nodig. Schakel deze in via Instellingen → AI-functies.',
     featureNotInstalled:
       'De functie "{feature}" is niet geïnstalleerd. Schakel deze in via Instellingen → AI-functies.',
+    passwordTooShort: "Het wachtwoord moet minimaal {minLength} tekens lang zijn.",
+    passwordNeedsUppercase: "Het wachtwoord moet een hoofdletter bevatten.",
+    passwordNeedsLowercase: "Het wachtwoord moet een kleine letter bevatten.",
+    passwordNeedsDigit: "Het wachtwoord moet een cijfer bevatten.",
+    passwordNeedsSpecial: "Het wachtwoord moet een speciaal teken bevatten.",
+    tooManyRequests: "Te veel pogingen. Wacht een minuut en probeer het opnieuw.",
   },
   sidebar: {
     sponsor: "Steun ons",

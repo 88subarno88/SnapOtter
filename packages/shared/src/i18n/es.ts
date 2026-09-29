@@ -4953,6 +4953,7 @@ export const es: TranslationKeys = {
     changeButton: "Cambiar contraseña",
     sidebarTitle: "Ya casi",
     sidebarDescription: "Establece una contraseña segura para proteger tu cuenta y estarás listo.",
+    sessionEnded: "Tu sesión ha terminado. Vuelve a iniciar sesión para cambiar tu contraseña.",
   },
   automate: {
     title: "Automatizar",
@@ -5197,6 +5198,12 @@ export const es: TranslationKeys = {
       '{tool} necesita la función "{feature}". Actívala en Configuración → Funciones de AI.',
     featureNotInstalled:
       'La función "{feature}" no está instalada. Actívala en Configuración → Funciones de AI.',
+    passwordTooShort: "La contraseña debe tener al menos {minLength} caracteres.",
+    passwordNeedsUppercase: "La contraseña debe contener una letra mayúscula.",
+    passwordNeedsLowercase: "La contraseña debe contener una letra minúscula.",
+    passwordNeedsDigit: "La contraseña debe contener un número.",
+    passwordNeedsSpecial: "La contraseña debe contener un carácter especial.",
+    tooManyRequests: "Demasiados intentos. Espera un minuto y vuelve a intentarlo.",
   },
   sidebar: {
     sponsor: "Apóyanos",

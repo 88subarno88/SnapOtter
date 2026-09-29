@@ -4889,6 +4889,8 @@ export const ja: TranslationKeys = {
     changeButton: "パスワード変更",
     sidebarTitle: "あと少しです",
     sidebarDescription: "強力なパスワードを設定してアカウントを保護すれば、準備完了です。",
+    sessionEnded:
+      "セッションが終了しました。パスワードを変更するには、もう一度サインインしてください。",
   },
   automate: {
     title: "自動化",
@@ -5133,6 +5135,12 @@ export const ja: TranslationKeys = {
       "{tool}には「{feature}」機能が必要です。設定 → AI機能で有効にしてください。",
     featureNotInstalled:
       "「{feature}」機能がインストールされていません。設定 → AI機能で有効にしてください。",
+    passwordTooShort: "パスワードは{minLength}文字以上にしてください。",
+    passwordNeedsUppercase: "パスワードには大文字を含める必要があります。",
+    passwordNeedsLowercase: "パスワードには小文字を含める必要があります。",
+    passwordNeedsDigit: "パスワードには数字を含める必要があります。",
+    passwordNeedsSpecial: "パスワードには特殊文字を含める必要があります。",
+    tooManyRequests: "試行回数が多すぎます。1分待ってからもう一度お試しください。",
   },
   sidebar: {
     sponsor: "支援する",
