@@ -90,6 +90,19 @@ function extToMime(ext: string): string {
 }
 
 /**
+ * The MIME type to store for a file that didn't validate as an image, given
+ * the type it claims (the client's part header, or one read off its name).
+ *
+ * Only validateImageBuffer() can vouch for an image type, so an image/* claim
+ * for bytes that failed it becomes application/octet-stream (#1349). Any other
+ * claim is kept: video, audio, PDF and Office files have no sniff here, and
+ * their previews branch on that type.
+ */
+function unverifiedMime(claimedMime: string): string {
+  return claimedMime.startsWith("image/") ? "application/octet-stream" : claimedMime;
+}
+
+/**
  * The width/height to store for a validated image, or null if they weren't
  * actually measured.
  *
@@ -269,8 +282,10 @@ export async function userFileRoutes(app: FastifyInstance): Promise<void> {
   /**
    * POST /api/v1/files/upload
    *
-   * Multipart form with one or more image file parts.
-   * Validates each (magic bytes + dimensions), stores to disk, creates DB record.
+   * Multipart form with one or more file parts. Each is checked as an image
+   * (magic bytes + dimensions); one that passes is stored with its sniffed
+   * type, one that doesn't is still kept, under a type from
+   * unverifiedMime(). Stores to disk, creates DB record.
    */
   app.post(
     "/api/v1/files/upload",
@@ -365,7 +380,7 @@ export async function userFileRoutes(app: FastifyInstance): Promise<void> {
           const safeName = sanitizeFilename(part.filename ?? "upload");
           const mimeType = isValidImage
             ? formatToMime(validation.format)
-            : part.mimetype || "application/octet-stream";
+            : unverifiedMime(part.mimetype || "application/octet-stream");
           const dimensions = measuredDimensions(isValidImage ? validation : null);
 
           const storedName = await saveFile(safeBuffer, safeName);
@@ -896,7 +911,9 @@ export async function userFileRoutes(app: FastifyInstance): Promise<void> {
     const baseName = parent.originalName.replace(/\.[^.]+$/, "");
     const resultName = `${baseName}${ext}`;
 
-    const mimeType = isValidImage ? formatToMime(validation.format) : extToMime(ext);
+    const mimeType = isValidImage
+      ? formatToMime(validation.format)
+      : unverifiedMime(extToMime(ext));
     const dimensions = measuredDimensions(isValidImage ? validation : null);
 
     // Sanitize SVG results to prevent XXE, SSRF, and script injection
