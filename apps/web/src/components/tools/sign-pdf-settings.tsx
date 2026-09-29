@@ -7,7 +7,12 @@ import { captureHandledError } from "@/lib/analytics";
 import { formatHeaders } from "@/lib/api";
 import { appUrl, resolveServerUrls } from "@/lib/app-url";
 import { format } from "@/lib/format";
-import { FRAME_HANDLING_FAILED, type ProgressFrame } from "@/lib/progress-frames";
+import {
+  frameFailure,
+  type JobFailure,
+  jobFailureMessage,
+  type ProgressFrame,
+} from "@/lib/progress-frames";
 import {
   addSignature,
   deleteSignature,
@@ -25,7 +30,7 @@ const SSE_STALL_TIMEOUT_MS = 5 * 60_000;
 interface ProgressHandlers {
   onProgress?: (percent: number) => void;
   onComplete: (result: Record<string, unknown>) => void;
-  onFailed: (error: string) => void;
+  onFailed: (failure: JobFailure) => void;
   onStall: () => void;
 }
 
@@ -102,7 +107,7 @@ export function subscribeSignPdfJobProgress(
         }
         if (data.phase === "failed") {
           cleanup();
-          handlers.onFailed(typeof data.error === "string" ? data.error : "Processing failed");
+          handlers.onFailed(frameFailure(data.error));
           return;
         }
         if (typeof data.percent === "number") handlers.onProgress?.(data.percent);
@@ -111,7 +116,7 @@ export function subscribeSignPdfJobProgress(
         // with it, so nothing else would ever settle the run.
         cleanup();
         try {
-          handlers.onFailed(FRAME_HANDLING_FAILED);
+          handlers.onFailed({ reason: "trackingFailed" });
         } catch {
           // onFailed may be what threw; the original error is rethrown below.
         }
@@ -301,8 +306,8 @@ export function SignPdfSettings({ signProps }: { signProps?: SignProps }) {
         landResult(r);
         finish();
       },
-      onFailed: (err) => {
-        setError(err);
+      onFailed: (failure) => {
+        setError(jobFailureMessage(failure, t.errors));
         finish();
       },
       onStall: () => {
