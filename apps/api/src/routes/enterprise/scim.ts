@@ -47,6 +47,17 @@ function scimActiveValue(value: unknown): boolean {
   return value === true || value === "true" || value === "True";
 }
 
+// A blank externalId means no external identity. Stored as "", it takes the
+// (auth_provider, external_id) index slot that NULL leaves free, so the next
+// blank one collides (issue #1008). Non-blank values are kept verbatim so the
+// externalId filter still matches exactly what the IdP sent. This does no type
+// checking: SCIM bodies have no schema yet, so a non-string passes through as
+// it did before.
+function scimExternalId(value: unknown): string | null {
+  if (typeof value === "string" && value.trim() === "") return null;
+  return (value as string | null | undefined) ?? null;
+}
+
 const DISABLED_ROLE_PREFIX = "disabled:";
 
 function restoredScimRole(role: string): string {
@@ -365,7 +376,7 @@ export async function registerScimRoutes(app: FastifyInstance): Promise<void> {
 
       const body = request.body as Record<string, unknown>;
       const userName = body.userName as string | undefined;
-      const externalId = body.externalId as string | undefined;
+      const externalId = scimExternalId(body.externalId);
       const active = body.active !== false; // default true
       const emails = body.emails as Array<{ value: string; primary?: boolean }> | undefined;
       if (!userName) {
@@ -409,7 +420,7 @@ export async function registerScimRoutes(app: FastifyInstance): Promise<void> {
             id,
             username: userName,
             email,
-            externalId: externalId ?? null,
+            externalId,
             role: active ? "user" : "disabled",
             team: teamId,
             authProvider: "scim",
@@ -444,7 +455,7 @@ export async function registerScimRoutes(app: FastifyInstance): Promise<void> {
         id,
         username: userName,
         email,
-        externalId: externalId ?? null,
+        externalId,
         role: active ? "user" : "disabled",
         team: teamId,
         legalHold: false,
@@ -570,7 +581,6 @@ export async function registerScimRoutes(app: FastifyInstance): Promise<void> {
 
       const body = request.body as Record<string, unknown>;
       const userName = body.userName as string | undefined;
-      const externalId = body.externalId as string | undefined;
       const active = body.active !== false;
       const emails = body.emails as Array<{ value: string; primary?: boolean }> | undefined;
 
@@ -590,8 +600,8 @@ export async function registerScimRoutes(app: FastifyInstance): Promise<void> {
         updates.username = userName;
       }
 
-      if (externalId !== undefined) {
-        updates.externalId = externalId;
+      if (body.externalId !== undefined) {
+        updates.externalId = scimExternalId(body.externalId);
       }
 
       const email = emails?.find((e) => e.primary)?.value ?? emails?.[0]?.value;
@@ -711,7 +721,7 @@ export async function registerScimRoutes(app: FastifyInstance): Promise<void> {
           if (op.path === "userName") {
             updates.username = op.value as string;
           } else if (op.path === "externalId") {
-            updates.externalId = op.value as string;
+            updates.externalId = scimExternalId(op.value);
           } else if (op.path === "emails" || op.path === 'emails[type eq "work"].value') {
             const emails = Array.isArray(op.value)
               ? (op.value as Array<{ value: string; primary?: boolean }>)
@@ -725,7 +735,9 @@ export async function registerScimRoutes(app: FastifyInstance): Promise<void> {
           if (!op.path && typeof op.value === "object" && op.value !== null) {
             const valObj = op.value as Record<string, unknown>;
             if (valObj.userName) updates.username = valObj.userName as string;
-            if (valObj.externalId !== undefined) updates.externalId = valObj.externalId as string;
+            if (valObj.externalId !== undefined) {
+              updates.externalId = scimExternalId(valObj.externalId);
+            }
             if (valObj.emails) {
               const emails = valObj.emails as Array<{ value: string; primary?: boolean }>;
               updates.email = emails.find((e) => e.primary)?.value ?? emails[0]?.value;
