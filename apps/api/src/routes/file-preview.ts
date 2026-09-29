@@ -49,7 +49,7 @@ function previewDirPath(): string {
  * be assumed dead. A limit of 0 means unlimited, so fall back to a day.
  */
 function staleAfterMs(): number {
-  const encodeS = env.JOB_TIMEOUT_LONG_S || 86_400;
+  const encodeS = env.PREVIEW_TIMEOUT_S || 86_400;
   const convertS = env.LIBREOFFICE_TIMEOUT_S || 120;
   return Math.max(encodeS, convertS) * 1000;
 }
@@ -142,6 +142,37 @@ function previewErrorBody(err: unknown): { error: string; code?: string; encoder
     return { error: friendlyError(err.message), code: err.code, encoder };
   }
   return { error: "Could not generate preview" };
+}
+
+/**
+ * Time limit for one preview encode, so a hung ffmpeg can't hold a request for
+ * the two-hour media job limit to render a clip capped at a minute (#1406).
+ * PREVIEW_TIMEOUT_S, 0 = unlimited.
+ */
+function previewTimeoutMs(): number {
+  return env.PREVIEW_TIMEOUT_S * 1000;
+}
+
+/**
+ * A signal that fires when the client hangs up before the response ends
+ * (#1406). Only the on-demand preview uses it: its output is thrown away, while
+ * a stored-file preview lands in the cache, so finishing that one after a
+ * proxy gives up turns the retry into a cache hit. Call release() once the
+ * encode settles.
+ */
+function abortOnDisconnect(request: FastifyRequest, reply: FastifyReply) {
+  const abort = new AbortController();
+  const onClose = () => {
+    if (!reply.raw.writableEnded) abort.abort();
+  };
+  // A hangup while the upload was still being read has already fired "close".
+  if (reply.raw.destroyed || request.raw.socket?.destroyed) abort.abort();
+  else reply.raw.once("close", onClose);
+  return {
+    signal: abort.signal,
+    clientGone: () => abort.signal.aborted,
+    release: () => reply.raw.off("close", onClose),
+  };
 }
 
 /** Best-effort removal of an unfinished preview; logged, since nothing else clears it. */
@@ -352,7 +383,7 @@ export async function filePreviewRoutes(app: FastifyInstance): Promise<void> {
               "-y",
               partialPath,
             ],
-            { timeoutMs: env.JOB_TIMEOUT_LONG_S * 1000 },
+            { timeoutMs: previewTimeoutMs() },
           );
         } else {
           await runFfmpeg(
@@ -368,7 +399,7 @@ export async function filePreviewRoutes(app: FastifyInstance): Promise<void> {
               "-y",
               partialPath,
             ],
-            { timeoutMs: env.JOB_TIMEOUT_LONG_S * 1000 },
+            { timeoutMs: previewTimeoutMs() },
           );
         }
       } catch (err) {
@@ -488,6 +519,8 @@ export async function filePreviewRoutes(app: FastifyInstance): Promise<void> {
       const inputPath = join(tmpdir(), `snapotter-preview-${id}.${ext}`);
       const outputExt = isVideo ? "mp4" : "mp3";
       const outputPath = join(tmpdir(), `snapotter-preview-${id}-out.${outputExt}`);
+      const disconnect = abortOnDisconnect(request, reply);
+      const encodeOptions = { timeoutMs: previewTimeoutMs(), signal: disconnect.signal };
 
       try {
         await writeFile(inputPath, fileBuffer);
@@ -516,7 +549,7 @@ export async function filePreviewRoutes(app: FastifyInstance): Promise<void> {
               "-y",
               outputPath,
             ],
-            { timeoutMs: env.JOB_TIMEOUT_LONG_S * 1000 },
+            encodeOptions,
           );
         } else {
           await runFfmpeg(
@@ -532,7 +565,7 @@ export async function filePreviewRoutes(app: FastifyInstance): Promise<void> {
               "-y",
               outputPath,
             ],
-            { timeoutMs: env.JOB_TIMEOUT_LONG_S * 1000 },
+            encodeOptions,
           );
         }
 
@@ -544,9 +577,14 @@ export async function filePreviewRoutes(app: FastifyInstance): Promise<void> {
           .header("Content-Length", outputBuffer.length)
           .send(outputBuffer);
       } catch (err) {
-        request.log.error({ err, filename }, "On-demand preview generation failed");
+        if (disconnect.clientGone()) {
+          request.log.info({ filename }, "On-demand preview stopped: client disconnected");
+        } else {
+          request.log.error({ err, filename }, "On-demand preview generation failed");
+        }
         return reply.status(422).send(previewErrorBody(err));
       } finally {
+        disconnect.release();
         await rm(inputPath, { force: true }).catch(() => {});
         await rm(outputPath, { force: true }).catch(() => {});
       }
