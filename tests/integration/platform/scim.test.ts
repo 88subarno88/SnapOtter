@@ -2355,6 +2355,117 @@ describe("SCIM licensed Users and Groups CRUD", () => {
       expect(row?.name).toBe(victim.displayName);
     });
 
+    describe("a PATCH that fails partway applies none of its operations (#1543)", () => {
+      // Each operation used to write straight to the database, so an earlier
+      // member change stayed committed when a later operation answered 400 or
+      // 409, while the IdP read the error as the whole request rejected.
+      async function patchGroup(id: string, operations: unknown[]) {
+        return crudApp.app.inject({
+          method: "PATCH",
+          url: `/api/v1/scim/v2/Groups/${id}`,
+          headers: authHeaders(),
+          payload: {
+            schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+            Operations: operations,
+          },
+        });
+      }
+
+      it("keeps an added member out when a later rename collides", async () => {
+        const taken = await createScimGroup({ displayName: uniqueName("scim-grp-atomic-taken") });
+        const user = await createScimUser({ userName: uniqueName("scim-grp-atomic-add-u") });
+        // Start the user somewhere other than Default, so staying put can't be
+        // confused with being moved back there.
+        const home = await createScimGroup({
+          displayName: uniqueName("scim-grp-atomic-home"),
+          members: [{ value: user.id }],
+        });
+        const group = await createScimGroup({ displayName: uniqueName("scim-grp-atomic-add") });
+
+        const res = await patchGroup(group.id, [
+          { op: "add", path: "members", value: [{ value: user.id }] },
+          { op: "replace", path: "displayName", value: taken.displayName },
+        ]);
+
+        expect(res.statusCode, res.body).toBe(409);
+        expect(JSON.parse(res.body)).toEqual({
+          schemas: [SCIM_ERROR_SCHEMA],
+          status: 409,
+          detail: "Group name already taken",
+          scimType: "uniqueness",
+        });
+        expect((await userRow(user.id))?.team).toBe(home.id);
+        const [row] = await db.select().from(schema.teams).where(eq(schema.teams.id, group.id));
+        expect(row?.name).toBe(group.displayName);
+      });
+
+      it("keeps a removed member in when a later rename is empty", async () => {
+        const user = await createScimUser({ userName: uniqueName("scim-grp-atomic-rm-u") });
+        const group = await createScimGroup({
+          displayName: uniqueName("scim-grp-atomic-rm"),
+          members: [{ value: user.id }],
+        });
+
+        const res = await patchGroup(group.id, [
+          { op: "remove", path: `members[value eq "${user.id}"]` },
+          // Mixed-case op name: the check before any write has to match the
+          // same ops the loop treats as a rename.
+          { op: "Replace", path: "displayName", value: "   " },
+        ]);
+
+        expect(res.statusCode, res.body).toBe(400);
+        expect(JSON.parse(res.body).detail).toBe("displayName cannot be empty");
+        expect((await userRow(user.id))?.team).toBe(group.id);
+      });
+
+      it("keeps the old membership when a member replace is followed by a colliding rename", async () => {
+        const taken = await createScimGroup({
+          displayName: uniqueName("scim-grp-atomic-rep-taken"),
+        });
+        const kept = await createScimUser({ userName: uniqueName("scim-grp-atomic-rep-kept") });
+        const incoming = await createScimUser({ userName: uniqueName("scim-grp-atomic-rep-in") });
+        const group = await createScimGroup({
+          displayName: uniqueName("scim-grp-atomic-rep"),
+          members: [{ value: kept.id }],
+        });
+
+        const res = await patchGroup(group.id, [
+          { op: "replace", path: "members", value: [{ value: incoming.id }] },
+          { op: "replace", path: "displayName", value: taken.displayName },
+        ]);
+
+        expect(res.statusCode, res.body).toBe(409);
+        expect((await userRow(kept.id))?.team).toBe(group.id);
+        expect((await userRow(incoming.id))?.team).toBe(DEFAULT_TEAM_ID);
+      });
+
+      it("commits every operation of a successful multi-op PATCH, in order", async () => {
+        const previous = await createScimUser({ userName: uniqueName("scim-grp-multi-prev") });
+        const first = await createScimUser({ userName: uniqueName("scim-grp-multi-a") });
+        const second = await createScimUser({ userName: uniqueName("scim-grp-multi-b") });
+        const group = await createScimGroup({
+          displayName: uniqueName("scim-grp-multi"),
+          members: [{ value: previous.id }],
+        });
+        const renamed = uniqueName("scim-grp-multi-renamed");
+
+        // The add only survives if it runs after the replace, and the rename
+        // lands alongside both.
+        const res = await patchGroup(group.id, [
+          { op: "replace", path: "members", value: [{ value: first.id }] },
+          { op: "add", path: "members", value: [{ value: second.id }] },
+          { op: "replace", path: "displayName", value: renamed },
+        ]);
+
+        expect(res.statusCode, res.body).toBe(200);
+        const [row] = await db.select().from(schema.teams).where(eq(schema.teams.id, group.id));
+        expect(row?.name).toBe(renamed);
+        expect((await userRow(first.id))?.team).toBe(group.id);
+        expect((await userRow(second.id))?.team).toBe(group.id);
+        expect((await userRow(previous.id))?.team).toBe(DEFAULT_TEAM_ID);
+      });
+    });
+
     it("returns a group by id with its members and 404 for unknown ids", async () => {
       const member = await createScimUser({ userName: uniqueName("scim-grp-get-m") });
       const group = await createScimGroup({
