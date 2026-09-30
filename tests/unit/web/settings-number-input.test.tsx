@@ -16,7 +16,8 @@ import { AdminSecuritySettings } from "@/components/settings/settings-dialog";
 
 afterEach(() => {
   cleanup();
-  apiGet.mockClear();
+  apiGet.mockReset();
+  apiGet.mockResolvedValue({ settings: {} });
   apiPut.mockReset();
 });
 
@@ -35,14 +36,16 @@ describe("settings number fields (#1186)", () => {
   });
 
   it("restores the previous value when the field is left empty", async () => {
+    apiGet.mockResolvedValue({ settings: { passwordMinLength: "10" } });
     render(<AdminSecuritySettings />);
     await waitFor(() => expect(apiGet).toHaveBeenCalled());
     const input = await screen.findByLabelText("Minimum Password Length");
+    await waitFor(() => expect(input).toHaveValue(10));
 
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: "" } });
     fireEvent.blur(input);
-    expect(input).toHaveValue(8);
+    expect(input).toHaveValue(10);
   });
 
   it("never sends an empty value when saving after clearing a field", async () => {
@@ -59,6 +62,6 @@ describe("settings number fields (#1186)", () => {
 
     await waitFor(() => expect(apiPut).toHaveBeenCalled());
     const payload = apiPut.mock.calls[0][1] as Record<string, unknown>;
-    expect(payload.passwordMinLength).not.toBe("");
+    expect(payload).not.toHaveProperty("passwordMinLength");
   });
 });
