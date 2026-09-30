@@ -7,6 +7,7 @@
  * call yields exactly one captureException with the ORIGINAL error object,
  * and the throttle allows one capture per distinct signature.
  */
+import { SafeError } from "@snapotter/shared";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   reportError,
@@ -86,6 +87,31 @@ describe("capture path", () => {
     expect(h.captureException).toHaveBeenCalledTimes(2);
   });
 
+  // #1414: without the job's age a sweep-aged input and a young miss look the same.
+  it.each([
+    [0, "lt_10s"],
+    [9_999, "lt_10s"],
+    [10_000, "lt_1h"],
+    [3_599_999, "lt_1h"],
+    [3_600_000, "lt_24h"],
+    [86_399_999, "lt_24h"],
+    [86_400_000, "gte_24h"],
+  ])("tags a %i ms job age as job_age=%s", async (ms, bucket) => {
+    await reportError(new Error("boom"), { source: "worker", pool: "image", jobAgeMs: ms });
+    expect(h.scope.setTag).toHaveBeenCalledWith("job_age", bucket);
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["negative (clock skew)", -5],
+    ["not a number", Number.NaN],
+    ["infinite", Number.POSITIVE_INFINITY],
+  ])("sets no job_age tag when the age is %s", async (_label, ms) => {
+    await reportError(new Error("boom"), { source: "worker", pool: "image", jobAgeMs: ms });
+    const tags = h.scope.setTag.mock.calls.map((c) => c[0]);
+    expect(tags).not.toContain("job_age");
+  });
+
   it("tags job_id so the event cross-references the DB row, logs, and PostHog stream", async () => {
     await reportError(new Error("boom"), { source: "worker", pool: "image", jobId: "job-abc" });
     expect(h.scope.setTag).toHaveBeenCalledWith("job_id", "job-abc");
@@ -95,6 +121,50 @@ describe("capture path", () => {
     const full = Object.assign(new Error("disk full"), { code: "ENOSPC" });
     await reportError(full, { source: "worker", pool: "image" });
     expect(h.scope.setFingerprint).toHaveBeenCalledWith(["operational", "ENOSPC"]);
+  });
+
+  it("groups an operational SafeError by its own code, whatever backend error it wraps (#1413)", async () => {
+    // The worker's INPUT_MISSING wraps a local ENOENT or an S3 NoSuchKey
+    // (which has no string .code). Both must land in the same Sentry issue.
+    const make = (cause: unknown) =>
+      new SafeError("Input file is no longer available. Upload it again.", {
+        kind: "operational",
+        code: "INPUT_MISSING",
+        statusCode: 410,
+        cause,
+      });
+    const local = Object.assign(new Error("ENOENT: no such file or directory, open '/x'"), {
+      code: "ENOENT",
+      syscall: "open",
+    });
+    const s3 = Object.assign(new Error("The specified key does not exist."), {
+      name: "NoSuchKey",
+      $metadata: { httpStatusCode: 404 },
+    });
+
+    await reportError(make(local), { source: "worker", pool: "image" });
+    expect(h.scope.setFingerprint).toHaveBeenLastCalledWith(["operational", "INPUT_MISSING"]);
+    expect(h.scope.setTag).toHaveBeenCalledWith("error_code", "INPUT_MISSING");
+
+    resetThrottleForTests();
+    await reportError(make(s3), { source: "worker", pool: "image" });
+    expect(h.scope.setFingerprint).toHaveBeenLastCalledWith(["operational", "INPUT_MISSING"]);
+  });
+
+  it("keeps the connectivity fingerprint for a SafeError that wraps a network failure", async () => {
+    // Connectivity is decided from the whole chain, ahead of the per-code
+    // operational fingerprint, so one outage stays one issue even though the
+    // tag now carries the SafeError's own code.
+    const err = new SafeError("upstream down", {
+      kind: "operational",
+      code: "some-op",
+      cause: Object.assign(new Error("connect ECONNREFUSED 10.0.0.1:443"), {
+        code: "ECONNREFUSED",
+      }),
+    });
+    await reportError(err, { source: "worker", pool: "image" });
+    expect(h.scope.setFingerprint).toHaveBeenLastCalledWith(["connectivity", "net-unavailable"]);
+    expect(h.scope.setTag).toHaveBeenCalledWith("error_code", "some-op");
   });
 
   it("prefers the connectivity fingerprint for infra-connectivity operational errors", async () => {

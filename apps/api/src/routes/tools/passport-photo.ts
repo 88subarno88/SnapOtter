@@ -6,6 +6,7 @@ import { detectFaceLandmarks, removeBackground } from "@snapotter/ai";
 import {
   FEATURE_BUNDLES,
   formatTargetKb,
+  hasServerErrorStatus,
   kbToBytes,
   PASSPORT_SPECS,
   PRINT_LAYOUTS,
@@ -19,7 +20,11 @@ import { formatZodErrors } from "../../lib/errors.js";
 import { getFirstMissingBundleForTool } from "../../lib/feature-status.js";
 import { validateImageBuffer } from "../../lib/file-validation.js";
 import { sanitizeFilename } from "../../lib/filename.js";
-import { decodeToSharpCompat, needsCliDecode } from "../../lib/format-decoders.js";
+import {
+  decodeToSharpCompat,
+  isDecoderUnavailable,
+  needsCliDecode,
+} from "../../lib/format-decoders.js";
 import { decodeHeic } from "../../lib/heic-converter.js";
 import { multipartFailure } from "../../lib/multipart-parts.js";
 import { getObjectBuffer, putObject } from "../../lib/object-storage.js";
@@ -312,6 +317,8 @@ export function registerPassportPhoto(app: FastifyInstance) {
           imageHeight: landmarksResult.imageHeight,
         });
       } catch (err) {
+        if (isDecoderUnavailable(err)) throw err;
+        if (hasServerErrorStatus(err)) throw err;
         request.log.error({ err, toolId: "passport-photo" }, "Passport photo analysis failed");
         return reply.status(422).send({
           error: "Passport photo analysis failed",
@@ -560,6 +567,7 @@ export function registerPassportPhoto(app: FastifyInstance) {
 
         return reply.send(response);
       } catch (err) {
+        if (hasServerErrorStatus(err)) throw err;
         request.log.error({ err, toolId: "passport-photo" }, "Passport photo generation failed");
         return reply.status(422).send({
           error: "Passport photo generation failed",

@@ -1,4 +1,4 @@
-import type { FastifyBaseLogger } from "fastify";
+import type { FastifyBaseLogger, FastifyReply } from "fastify";
 import type { InputValidationError } from "../modality/contract.js";
 import { reportError } from "./error-report.js";
 
@@ -23,4 +23,58 @@ export function reportEngineUnavailable(
   reported.add(key);
   log.warn({ code: err.code, toolId, err }, "Tool engine unavailable during input preparation");
   void reportError(err, { source: "http", toolId, statusCode: err.statusCode });
+}
+
+/**
+ * Reply with an input handler's rejection. A 5xx one is also logged and
+ * reported, once per tool, which suits endpoints the browser fires on its own
+ * (thumbnails, live previews) where a log line per request would bury the
+ * signal (#1428).
+ */
+export function sendInputValidationError(
+  reply: FastifyReply,
+  err: InputValidationError,
+  toolId: string,
+  log: Pick<FastifyBaseLogger, "warn">,
+) {
+  reportEngineUnavailable(err, toolId, log);
+  return reply.status(err.statusCode).send({
+    error: err.message,
+    ...(err.details !== undefined && { details: err.details }),
+    ...(err.code !== undefined && { code: err.code }),
+  });
+}
+
+/** What a batch keeps about a file that failed input preparation, besides its message. */
+export function preFailureFaultFields(err: InputValidationError): {
+  statusCode: number;
+  code?: string;
+  details?: string;
+} {
+  return {
+    statusCode: err.statusCode,
+    ...(err.code && { code: err.code }),
+    ...(err.details && { details: err.details }),
+  };
+}
+
+/**
+ * When every file in a batch failed input preparation with the same 5xx code
+ * (ffprobe or qpdf that can't start), that is the batch's failure, not the
+ * files': the reply carries its status, code, and operator hint instead of a
+ * generic 422 (#1432). Anything mixed, or any 4xx, returns null.
+ */
+export function sharedServerFault(
+  failures: Array<{ error: string; statusCode?: number; code?: string; details?: string }>,
+): { statusCode: number; code: string; error: string; details?: string } | null {
+  const first = failures[0];
+  if (!first?.code || first.statusCode === undefined || first.statusCode < 500) return null;
+  const same = failures.every((f) => f.code === first.code && f.statusCode === first.statusCode);
+  if (!same) return null;
+  return {
+    statusCode: first.statusCode,
+    code: first.code,
+    error: first.error,
+    ...(first.details && { details: first.details }),
+  };
 }

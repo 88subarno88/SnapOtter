@@ -92,6 +92,9 @@ async function purgeOcrRuntimeDownloads(aiDataDir: string) {
 }
 
 afterEach(() => {
+  // A test that fakes timers and then times out never reaches its own
+  // finally, so restore them here or every later test runs on a frozen clock.
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   for (const directory of temporaryDirectories.splice(0)) {
@@ -284,6 +287,43 @@ describe("canonicalRuntimeJson integer-like keys (#1411)", () => {
   });
 });
 
+describe("canonicalRuntimeJson numbers (#1415)", () => {
+  // Python's json.dumps writes floats as 1.0, -0.0 and 1e-07 and keeps big
+  // integers exact; JS can't reproduce either after JSON.parse. The canonical
+  // form only allows safe integers, which print the same on both sides.
+  it("writes safe integers exactly as Python does", () => {
+    // Python: {"max":9007199254740991,"min":-9007199254740991,"t":true,"zero":0}
+    expect(
+      canonicalRuntimeJson({
+        zero: 0,
+        t: true,
+        min: -Number.MAX_SAFE_INTEGER,
+        max: Number.MAX_SAFE_INTEGER,
+      }),
+    ).toBe('{"max":9007199254740991,"min":-9007199254740991,"t":true,"zero":0}\n');
+  });
+
+  it("rejects fractions, unsafe integers and non-finite numbers wherever they sit", () => {
+    for (const value of [
+      { a: 1.5 },
+      { a: [1e-7] },
+      { a: { b: Number.MAX_SAFE_INTEGER + 1 } },
+      { a: -(2 ** 60) },
+      JSON.parse('{"a":1e400}') as unknown,
+      [Number.NaN],
+      Number.POSITIVE_INFINITY,
+    ]) {
+      expect(() => canonicalRuntimeJson(value)).toThrow(/safe integer/);
+    }
+  });
+
+  it("names where the offending number sits", () => {
+    expect(() => canonicalRuntimeJson({ a: { b: [1, 2, 0.5] } })).toThrow(/a\.b\[2\] is not one/);
+    expect(() => canonicalRuntimeJson({ ok: 1, z: 1.5 })).toThrow(/ z is not one/);
+    expect(() => canonicalRuntimeJson(0.5)).toThrow(/the top-level value is not one/);
+  });
+});
+
 describe("remainingInstallerTimeoutMs", () => {
   it("floors a fractional remaining budget to the safe integer the installer requires", () => {
     // The deadline is set at one performance.now() read and the remaining time is
@@ -350,10 +390,36 @@ describe("verifyRuntimeIndex", () => {
   });
 
   it("requires a signed positive safe minimum-memory policy", () => {
-    for (const minimumMemoryBytes of [null, 0, -1, Number.MAX_SAFE_INTEGER + 1]) {
+    for (const minimumMemoryBytes of [null, 0, -1]) {
       const fixture = signedIndex({ minimumMemoryBytes });
       expect(() => verifyRuntimeIndex(fixture.raw, TARGET, [fixture.trustKey], "2.1.0")).toThrow(
         "memory",
+      );
+    }
+    // An unsafe integer can't be canonicalized at all (#1415), so it's
+    // refused before the memory policy is ever read.
+    expect(() => signedIndex({ minimumMemoryBytes: Number.MAX_SAFE_INTEGER + 1 })).toThrow(
+      /safe integer/,
+    );
+  });
+
+  it("names the offending field when a signed index carries a non-integer (#1415)", () => {
+    // Python's signer writes 1000.5 and 1e-07 as floats and keeps big integers
+    // exact; JSON.parse turns all three into numbers JS would re-serialize
+    // differently, so the verifier must say where instead of reporting a
+    // generic canonical-bytes mismatch.
+    const fixture = signedIndex();
+    for (const replacement of [
+      '"expandedSize":1000.5',
+      '"expandedSize":1e-07',
+      '"expandedSize":9007199254740993',
+    ]) {
+      const raw = Buffer.from(
+        fixture.raw.toString("utf8").replace('"expandedSize":1000', replacement),
+      );
+      expect(raw.equals(fixture.raw)).toBe(false);
+      expect(() => verifyRuntimeIndex(raw, TARGET, [fixture.trustKey], "2.1.0")).toThrow(
+        /artifacts\[0\]\.archive\.expandedSize is not one/,
       );
     }
   });
@@ -1978,22 +2044,43 @@ describe("downloadVerifiedRuntimeRelease", () => {
   });
 
   it("enforces the overall deadline while a response body is stalled", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "snapotter-ocr-deadline-"));
-    temporaryDirectories.push(directory);
-    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(
-        new ReadableStream<Uint8Array>({
-          pull() {
-            return new Promise(() => {});
-          },
-        }),
-        { status: 200 },
-      ),
-    );
+    // This used to bound the wall-clock time of a 10ms deadline, which fired
+    // during setup, before fetch was ever called. So it never reached a
+    // stalled body, and on a loaded runner the setup alone passed the bound
+    // (#1617). Fake timers hold the deadline until the read is actually
+    // stalled, then fire it. The stall watchdog's timer never advances, so if
+    // the deadline couldn't interrupt the read, this would hang until the
+    // test's timeout instead of rejecting. The outer "timed out" message
+    // wraps any error once the deadline has aborted, so the cause is what
+    // proves the read itself was interrupted, and one attempt keeps a stall
+    // plus a retry sleep from standing in for it.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const directory = mkdtempSync(join(tmpdir(), "snapotter-ocr-deadline-"));
+      temporaryDirectories.push(directory);
+      let bodyRead!: () => void;
+      const reading = new Promise<void>((resolve) => {
+        bodyRead = resolve;
+      });
+      const cancel = vi.fn();
+      const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(
+          new ReadableStream<Uint8Array>(
+            {
+              pull() {
+                bodyRead();
+                return new Promise(() => {});
+              },
+              cancel,
+            },
+            // No read-ahead: pull runs only once the installer reads the body.
+            { highWaterMark: 0 },
+          ),
+          { status: 200 },
+        ),
+      );
 
-    const startedAt = Date.now();
-    await expect(
-      downloadVerifiedRuntimeRelease({
+      const download = downloadVerifiedRuntimeRelease({
         aiDataDir: directory,
         bundleRepo: "snapotter-hq/feature-bundles",
         version: "2.1.0",
@@ -2002,10 +2089,25 @@ describe("downloadVerifiedRuntimeRelease", () => {
         fetchImpl,
         timeoutMs: 10,
         stallTimeoutMs: 1_000,
-      }),
-    ).rejects.toThrow("timed out after 10ms");
-    expect(Date.now() - startedAt).toBeLessThan(500);
-  });
+        retry: { maxAttempts: 1 },
+      });
+      const outcome = expect(download).rejects.toMatchObject({
+        message: expect.stringContaining("timed out after 10ms"),
+        cause: expect.objectContaining({
+          message: expect.stringContaining("download was canceled or timed out"),
+        }),
+      });
+      // A download that fails before it reads the body settles first and
+      // surfaces its own error here, instead of a bare timeout.
+      await Promise.race([reading, download]);
+      await vi.advanceTimersByTimeAsync(10);
+      await outcome;
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      expect(cancel).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 5_000);
 
   it("does not let an unresponsive body cancellation defeat the stall watchdog", async () => {
     const directory = mkdtempSync(join(tmpdir(), "snapotter-ocr-cancel-watchdog-"));

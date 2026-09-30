@@ -10,15 +10,22 @@ import { z } from "zod";
 import { runPerFrame } from "../../lib/animated-image.js";
 import { autoOrient } from "../../lib/auto-orient.js";
 import type { DeepEnhanceSkipReason } from "../../lib/batch-file-notes.js";
+import { sendInputValidationError } from "../../lib/engine-unavailable.js";
 import { reportError } from "../../lib/error-report.js";
+import { stripInternalPaths } from "../../lib/errors.js";
 import { isToolInstalled } from "../../lib/feature-status.js";
 import { validateImageBuffer } from "../../lib/file-validation.js";
-import { decodeToSharpCompat, needsCliDecode } from "../../lib/format-decoders.js";
+import {
+  decodeToSharpCompat,
+  isDecoderUnavailable,
+  needsCliDecode,
+} from "../../lib/format-decoders.js";
 import { decodeHeic } from "../../lib/heic-converter.js";
 import { asInputErrorIfUndecodable, withImageEncodeContext } from "../../lib/image-error.js";
 import { logger } from "../../lib/logger.js";
 import { multipartFailure } from "../../lib/multipart-parts.js";
 import { outputFormatFor, resolveOutputFormat } from "../../lib/output-format.js";
+import { engineUnavailable } from "../../modality/image-input.js";
 import { createToolRoute } from "../tool-factory.js";
 
 const settingsSchema = z.object({
@@ -239,9 +246,17 @@ export function registerImageEnhancement(app: FastifyInstance) {
         try {
           fileBuffer = await decodeHeic(fileBuffer);
         } catch (err) {
+          if (isDecoderUnavailable(err)) {
+            return sendInputValidationError(
+              reply,
+              engineUnavailable(err),
+              "image-enhancement",
+              request.log,
+            );
+          }
           return reply.status(422).send({
             error: "Failed to decode HEIC file",
-            details: err instanceof Error ? err.message : String(err),
+            details: stripInternalPaths(err instanceof Error ? err.message : String(err)),
           });
         }
       }
@@ -251,9 +266,17 @@ export function registerImageEnhancement(app: FastifyInstance) {
         try {
           fileBuffer = await decodeToSharpCompat(fileBuffer, validation.format);
         } catch (err) {
+          if (isDecoderUnavailable(err)) {
+            return sendInputValidationError(
+              reply,
+              engineUnavailable(err),
+              "image-enhancement",
+              request.log,
+            );
+          }
           return reply.status(422).send({
             error: `Failed to decode ${validation.format} file`,
-            details: err instanceof Error ? err.message : String(err),
+            details: stripInternalPaths(err instanceof Error ? err.message : String(err)),
           });
         }
       }

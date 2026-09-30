@@ -3,9 +3,11 @@ import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { seamCarve } from "@snapotter/ai";
+import { hasServerErrorStatus } from "@snapotter/shared";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { autoOrient } from "../../lib/auto-orient.js";
+import { sendInputValidationError } from "../../lib/engine-unavailable.js";
 import { formatZodErrors, friendlyError } from "../../lib/errors.js";
 import { validateImageBuffer } from "../../lib/file-validation.js";
 import { sanitizeFilename } from "../../lib/filename.js";
@@ -75,8 +77,9 @@ export function registerContentAwareResize(app: FastifyInstance) {
         filename = prepared.filename;
       } catch (err) {
         if (err instanceof InputValidationError) {
-          return reply.status(err.statusCode).send({ error: err.message, details: err.details });
+          return sendInputValidationError(reply, err, "content-aware-resize", request.log);
         }
+        if (hasServerErrorStatus(err)) throw err;
         return reply.status(422).send({
           error: "Failed to prepare image",
           details: friendlyError(err instanceof Error ? err.message : String(err)),
@@ -149,6 +152,7 @@ export function registerContentAwareResize(app: FastifyInstance) {
           await rm(scratchDir, { recursive: true, force: true }).catch(() => {});
         }
       } catch (err) {
+        if (hasServerErrorStatus(err)) throw err;
         request.log.error({ err, toolId: "content-aware-resize" }, "Content-aware resize failed");
         return reply.status(422).send({
           error: "Content-aware resize failed",
