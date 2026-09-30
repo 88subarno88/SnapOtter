@@ -153,9 +153,8 @@ class InstallRuntimeTests(unittest.TestCase):
         self.fixture = RuntimeFixture(self.root)
         self.host = install_runtime.HostInfo(platform="linux", machine="x86_64")
         # Installs would otherwise probe the real host's cgroup memory, which
-        # makes the suite depend on the host: without a private cgroup
-        # namespace (GitHub runners, bare WSL2) the probe reaches the cgroup v2
-        # root and fails (#1636). The probe's own tests call the real function.
+        # makes the suite depend on the host's cgroup layout and limits. The
+        # probe's own tests call the real function.
         self._real_effective_memory_bytes = install_runtime._effective_memory_bytes
         memory_probe = mock.patch.object(
             install_runtime, "_effective_memory_bytes", return_value=64 * 1024**3
@@ -644,12 +643,38 @@ class InstallRuntimeTests(unittest.TestCase):
                 6 * gib
             ),
             "/sys/fs/cgroup/system.slice/memory.max": str(5 * gib),
-            "/sys/fs/cgroup/memory.max": "max\n",
         }
         with mock.patch.object(os, "sysconf", side_effect=[8 * gib, 1]), mock.patch.object(
             Path, "read_text", new=read_from(host_files)
         ):
             self.assertEqual(self._real_effective_memory_bytes(), 5 * gib)
+
+    def test_effective_memory_fails_closed_when_a_non_root_limit_is_missing(
+        self,
+    ) -> None:
+        gib = 1024 * 1024 * 1024
+        files = {
+            "/proc/self/cgroup": "0::/system.slice/docker-deadbeef.scope\n",
+            "/proc/self/mountinfo": (
+                "29 23 0:26 / /sys/fs/cgroup rw,nosuid,nodev,noexec,relatime "
+                "- cgroup2 cgroup rw\n"
+            ),
+            "/sys/fs/cgroup/system.slice/docker-deadbeef.scope/memory.max": str(
+                6 * gib
+            ),
+        }
+
+        def read_text(path, *args, **kwargs):
+            value = files.get(str(path))
+            if value is None:
+                raise FileNotFoundError(path)
+            return value
+
+        with mock.patch.object(os, "sysconf", side_effect=[8 * gib, 1]), mock.patch.object(
+            Path, "read_text", new=read_text
+        ):
+            with self.assertRaisesRegex(install_runtime.PreflightError, "cgroup memory"):
+                self._real_effective_memory_bytes()
 
     def test_effective_memory_fails_closed_for_unreadable_identified_controller(
         self,
