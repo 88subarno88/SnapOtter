@@ -81,11 +81,11 @@ describe("clientJobId 400 gate", () => {
       expect(JSON.parse(res.body).error).toBe(INVALID_CLIENT_JOB_ID_ERROR);
     });
 
-    it(`${route.name} accepts a UUID clientJobId`, async () => {
+    it(`${route.name} accepts a UUID clientJobId and moves on to the file check`, async () => {
       const res = await postClientJobId(route.url, "3f2b8c1e-9d4a-4e6b-8f0c-1a2b3c4d5e6f");
 
-      expect(res.statusCode).not.toBe(500);
-      expect(JSON.parse(res.body).error).not.toBe(INVALID_CLIENT_JOB_ID_ERROR);
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).error).toMatch(/^No (image |SVG )?files? provided$/);
     });
   }
 
@@ -113,12 +113,15 @@ describe("parseClientJobIdField", () => {
     expect(parseClientJobIdField(null)).toBeUndefined();
   });
 
-  it.each(["3f2b8c1e-9d4a-4e6b-8f0c-1a2b3c4d5e6f", "job_42", "client.job:7", "a".repeat(128)])(
-    "accepts %j",
-    (value) => {
-      expect(parseClientJobIdField(value)).toBe(value);
-    },
-  );
+  it.each([
+    "3f2b8c1e-9d4a-4e6b-8f0c-1a2b3c4d5e6f",
+    "job_42",
+    "client.job-7",
+    "007a",
+    "a".repeat(128),
+  ])("accepts %j", (value) => {
+    expect(parseClientJobIdField(value)).toBe(value);
+  });
 
   it.each([
     "",
@@ -130,6 +133,14 @@ describe("parseClientJobIdField", () => {
     "../etc/passwd",
     "çãú",
     "a".repeat(129),
+    // BullMQ rejects integer and ':' custom ids; object keys need an
+    // alphanumeric first character and no '..'. The batch routes use both.
+    "12345",
+    "client.job:7",
+    "_run",
+    "-run",
+    ".run",
+    "a..b",
   ])("rejects %j", (value) => {
     expect(parseClientJobIdField(value)).toBeNull();
   });

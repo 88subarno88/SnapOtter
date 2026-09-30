@@ -70,9 +70,12 @@ export function parseSaveModeField(raw: string | null): LibrarySaveMode | undefi
 
 /** Error message for the { error } 400 response when a multipart clientJobId field is malformed. */
 export const INVALID_CLIENT_JOB_ID_ERROR =
-  "Invalid clientJobId (expected 1-128 letters, digits, '_', '-', '.' or ':')";
+  "Invalid clientJobId (expected 1-128 letters, digits, '_', '-' or '.', starting with a letter or digit, not all digits, no '..')";
 
-const CLIENT_JOB_ID_PATTERN = /^[\w.:-]{1,128}$/;
+// The batch routes also use the id as a BullMQ flow job id (no ':', not an
+// integer) and as an object-key segment (VALID_KEY in lib/object-storage.ts:
+// alphanumeric first character, no '..'), so the pattern is the intersection.
+const CLIENT_JOB_ID_PATTERN = /^(?!\d+$)(?!.*\.\.)[A-Za-z0-9][\w.-]{0,127}$/;
 
 /**
  * Validate a client-supplied multipart clientJobId field. The value becomes a
