@@ -3,7 +3,7 @@
  * branches that the integration suite exercises only on the happy path:
  *   - storageTtlSweep: legal-hold users/teams, deleteAfter sweep (ok + error),
  *     maxAgeMs<=0 and empty-dir early returns, per-dir deletePrefix failure,
- *     legal-hold skip on expired dirs, and the console.log/error side effects.
+ *     legal-hold skip on expired dirs, and what each outcome logs.
  *   - retentionSweep: jobs/audit retention on and off, tamper-resistant guard.
  *   - scheduleSystemJobs: the CLEANUP_INTERVAL_MINUTES>0 upsert path.
  *   - enqueueSystemJob: one-shot enqueue.
@@ -13,6 +13,20 @@
  * select() calls in storageTtlSweep/retentionSweep deterministically.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+// The code under test logs through the API's pino logger (#1500); mock it,
+// since config.js is stubbed without LOG_DIR, and read the calls from it.
+const loggerMock = vi.hoisted(() => ({
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  debug: vi.fn(),
+}));
+
+function loggerCalls(level: "info" | "warn" | "error") {
+  loggerMock[level].mockClear();
+  return loggerMock[level];
+}
 
 const getQueueMock = vi.hoisted(() => vi.fn());
 const runSiemForwardMock = vi.hoisted(() => vi.fn());
@@ -47,6 +61,9 @@ const schemaMock = vi.hoisted(() => ({
     createdAt: "jobs.createdAt",
     completedAt: "jobs.completedAt",
     deleteAfter: "jobs.deleteAfter",
+    status: "jobs.status",
+    toolId: "jobs.toolId",
+    type: "jobs.type",
   },
   settings: { key: "settings.key", value: "settings.value" },
 }));
@@ -134,6 +151,7 @@ async function loadSystemJobs(
     inArray: vi.fn(() => "inArray"),
     isNotNull: vi.fn(() => "isNotNull"),
     lt: vi.fn(() => "lt"),
+    ne: vi.fn(() => "ne"),
     sql: vi.fn(() => "sql"),
   }));
 
@@ -183,6 +201,10 @@ async function loadSystemJobs(
   vi.doMock("../../../../apps/api/src/jobs/siem-forward.js", () => ({
     runSiemForward: runSiemForwardMock,
   }));
+
+  // restoreAllMocks() keeps a vi.fn()'s calls, so start each load with none.
+  for (const fn of Object.values(loggerMock)) fn.mockClear();
+  vi.doMock("../../../../apps/api/src/lib/logger.js", () => ({ logger: loggerMock }));
 
   return import("../../../../apps/api/src/jobs/system-jobs.js");
 }
@@ -365,7 +387,7 @@ describe("storageTtlSweep", () => {
 
   it("cleans jobs by deleteAfter, then early-returns when maxAgeMs <= 0", async () => {
     delete process.env.SENTRY_CRON_MONITORS;
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const logSpy = loggerCalls("info");
     const { SYSTEM_JOBS, runSystemJob } = await loadSystemJobs();
 
     seedNoLegalHold();
@@ -425,8 +447,11 @@ describe("storageTtlSweep", () => {
     expect(deletePrefixMock).not.toHaveBeenCalled();
   });
 
-  it("swallows a deleteAfter deletePrefix failure without incrementing the counter", async () => {
+  // #1442: these failures used to vanish in an empty catch, so a team's
+  // retention deadline could stop being honored with no trace anywhere.
+  it("counts and logs a deleteAfter deletePrefix failure instead of swallowing it", async () => {
     delete process.env.SENTRY_CRON_MONITORS;
+    const errSpy = loggerCalls("error");
     const { SYSTEM_JOBS, runSystemJob } = await loadSystemJobs();
 
     queueSelect("users", []);
@@ -437,8 +462,113 @@ describe("storageTtlSweep", () => {
 
     const result = await runSystemJob({ name: SYSTEM_JOBS.storageTtl } as never);
 
-    // The try/catch swallows the failure; deleteAfterCleaned stays 0.
-    expect(result).toEqual({ removed: 0, failed: 0 });
+    // Neither prefix went, so the job isn't cleaned, and both failures count
+    // (per dir, like the global sweep) on the early-return path too.
+    expect(result).toEqual({ removed: 0, failed: 2 });
+    const logged = errSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(logged).toContain("deleteAfter");
+    expect(logged).toContain("uploads/boom: S3 down");
+    expect(logged).toContain("outputs/boom: S3 down");
+    errSpy.mockRestore();
+  });
+
+  // The paths a default install takes (FILE_MAX_AGE_HOURS > 0) must report
+  // deadline failures too, not only the maxAge <= 0 early return.
+  it("adds deleteAfter failures to the global sweep's own count on the final return", async () => {
+    delete process.env.SENTRY_CRON_MONITORS;
+    const errSpy = loggerCalls("error");
+    const { SYSTEM_JOBS, runSystemJob } = await loadSystemJobs();
+
+    queueSelect("users", []);
+    queueSelect("teams", []);
+    queueSelect("jobs", [{ id: "da", userId: null }]);
+    getMaxAgeMsMock.mockResolvedValue(3_600_000);
+    const old = Date.now() - 7_200_000;
+    listJobDirsMock.mockImplementation(async (prefix: "uploads" | "outputs") =>
+      prefix === "uploads"
+        ? [
+            { key: "uploads/stale", size: 0, mtimeMs: old },
+            { key: "uploads/broken", size: 0, mtimeMs: old },
+          ]
+        : [],
+    );
+    deletePrefixMock.mockImplementation(async (prefix: string) => {
+      if (prefix === "uploads/da" || prefix === "uploads/broken") throw new Error("S3 down");
+    });
+
+    const result = await runSystemJob({ name: SYSTEM_JOBS.storageTtl } as never);
+
+    // Global: 1 removed, 1 failed. Deadline: 1 failed, job not cleaned.
+    expect(result).toEqual({ removed: 1, failed: 2 });
+    errSpy.mockRestore();
+  });
+
+  it("reports deleteAfter failures on the empty-dir early return", async () => {
+    // A permission fault fails the deadline deletes and, on the local
+    // backend, empties the global listing too, so this path is reachable.
+    delete process.env.SENTRY_CRON_MONITORS;
+    const errSpy = loggerCalls("error");
+    const { SYSTEM_JOBS, runSystemJob } = await loadSystemJobs();
+
+    queueSelect("users", []);
+    queueSelect("teams", []);
+    queueSelect("jobs", [{ id: "da", userId: null }]);
+    getMaxAgeMsMock.mockResolvedValue(3_600_000);
+    deletePrefixMock.mockRejectedValue(new Error("EACCES: permission denied"));
+
+    const result = await runSystemJob({ name: SYSTEM_JOBS.storageTtl } as never);
+
+    expect(result).toEqual({ removed: 0, failed: 2 });
+    errSpy.mockRestore();
+  });
+
+  it("caps the logged deleteAfter failures during a store-wide fault", async () => {
+    delete process.env.SENTRY_CRON_MONITORS;
+    const errSpy = loggerCalls("error");
+    const { SYSTEM_JOBS, runSystemJob } = await loadSystemJobs();
+
+    queueSelect("users", []);
+    queueSelect("teams", []);
+    queueSelect(
+      "jobs",
+      Array.from({ length: 15 }, (_, i) => ({ id: `job-${i}`, userId: null })),
+    );
+    getMaxAgeMsMock.mockResolvedValue(0);
+    deletePrefixMock.mockRejectedValue(new Error("S3 down"));
+
+    const result = await runSystemJob({ name: SYSTEM_JOBS.storageTtl } as never);
+
+    expect(result).toEqual({ removed: 0, failed: 30 });
+    const logged = errSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(logged).toContain("30 deleteAfter dir(s) failed to delete");
+    expect(logged.match(/: S3 down/g)).toHaveLength(20);
+    expect(logged).toContain("...and 10 more");
+    errSpy.mockRestore();
+  });
+
+  it("still deletes outputs/ when uploads/ fails, and doesn't count the job as cleaned", async () => {
+    delete process.env.SENTRY_CRON_MONITORS;
+    const errSpy = loggerCalls("error");
+    const logSpy = loggerCalls("info");
+    const { SYSTEM_JOBS, runSystemJob } = await loadSystemJobs();
+
+    queueSelect("users", []);
+    queueSelect("teams", []);
+    queueSelect("jobs", [{ id: "half", userId: null }]);
+    deletePrefixMock.mockImplementation(async (prefix: string) => {
+      if (prefix === "uploads/half") throw new Error("EACCES: permission denied");
+    });
+    getMaxAgeMsMock.mockResolvedValue(0);
+
+    const result = await runSystemJob({ name: SYSTEM_JOBS.storageTtl } as never);
+
+    expect(deletePrefixMock).toHaveBeenCalledWith("outputs/half");
+    expect(result).toEqual({ removed: 0, failed: 1 });
+    expect(logSpy.mock.calls.map((c) => c[0])).not.toContain(
+      "Storage TTL: cleaned up 1 jobs by deleteAfter",
+    );
+    errSpy.mockRestore();
+    logSpy.mockRestore();
   });
 
   it("recovers when the whole deleteAfter query throws (best-effort), then runs the global sweep", async () => {
@@ -447,7 +577,8 @@ describe("storageTtlSweep", () => {
 
     queueSelect("users", []);
     queueSelect("teams", []);
-    // The deleteAfter select rejects; the outer try/catch must swallow it.
+    // The deleteAfter select rejects; the outer try/catch logs it and the
+    // global sweep still runs.
     queueSelect("jobs", THROW);
     getMaxAgeMsMock.mockResolvedValue(3_600_000);
 
@@ -457,16 +588,24 @@ describe("storageTtlSweep", () => {
       return [];
     });
 
+    const errSpy = loggerCalls("error");
+
     const result = await runSystemJob({ name: SYSTEM_JOBS.storageTtl } as never);
 
     // deleteAfterCleaned stayed 0 (query threw); the global sweep still removed 1.
     expect(result).toEqual({ removed: 1, failed: 0 });
     expect(deletePrefixMock).toHaveBeenCalledWith("uploads/after-throw");
+    // The query failure is logged rather than swallowed (#1442), with the
+    // error object itself so a wrapped cause (DrizzleQueryError) survives.
+    const call = errSpy.mock.calls.find((c) => String(c[1]).includes("deleteAfter sweep failed"));
+    expect(call, "the failed deadline query was not logged").toBeDefined();
+    expect(call?.[0]).toMatchObject({ err: { message: "select failed" } });
+    errSpy.mockRestore();
   });
 
   it("expires stale local dirs in the global sweep and logs the removal", async () => {
     delete process.env.SENTRY_CRON_MONITORS;
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const logSpy = loggerCalls("info");
     const { SYSTEM_JOBS, runSystemJob } = await loadSystemJobs();
 
     queueSelect("users", []);
@@ -497,7 +636,7 @@ describe("storageTtlSweep", () => {
 
   it("records failures and logs them when a global-sweep deletePrefix throws", async () => {
     delete process.env.SENTRY_CRON_MONITORS;
-    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const errSpy = loggerCalls("error");
     const { SYSTEM_JOBS, runSystemJob } = await loadSystemJobs();
 
     queueSelect("users", []);
@@ -524,9 +663,41 @@ describe("storageTtlSweep", () => {
     errSpy.mockRestore();
   });
 
+  it("caps the logged global-sweep failures when every delete is refused (#1500)", async () => {
+    // A store that refuses every delete (say, dirs left behind by a root
+    // container) fails every expired dir, every sweep. The line now lands in
+    // the size-limited LOG_DIR, so it must not grow with the dir count.
+    delete process.env.SENTRY_CRON_MONITORS;
+    const errSpy = loggerCalls("error");
+    const { SYSTEM_JOBS, runSystemJob } = await loadSystemJobs();
+
+    queueSelect("users", []);
+    queueSelect("teams", []);
+    queueSelect("jobs", []);
+    getMaxAgeMsMock.mockResolvedValue(3_600_000);
+
+    const oldMtime = Date.now() - 7_200_000;
+    listJobDirsMock.mockImplementation(async (prefix: "uploads" | "outputs") =>
+      Array.from({ length: 15 }, (_, i) => ({
+        key: `${prefix}/job-${i}`,
+        size: 0,
+        mtimeMs: oldMtime,
+      })),
+    );
+    deletePrefixMock.mockRejectedValue(new Error("EACCES: permission denied"));
+
+    const result = await runSystemJob({ name: SYSTEM_JOBS.storageTtl } as never);
+
+    expect(result).toEqual({ removed: 0, failed: 30 });
+    const logged = errSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(logged).toContain("30 dir(s) failed to delete");
+    expect(logged.match(/: EACCES: permission denied/g)).toHaveLength(20);
+    expect(logged).toContain("...and 10 more");
+  });
+
   it("stringifies non-Error rejections from a failed deletePrefix", async () => {
     delete process.env.SENTRY_CRON_MONITORS;
-    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const errSpy = loggerCalls("error");
     const { SYSTEM_JOBS, runSystemJob } = await loadSystemJobs();
 
     queueSelect("users", []);
@@ -614,5 +785,129 @@ describe("storageTtlSweep", () => {
     expect(result).toEqual({ removed: 1, failed: 0 });
     expect(deletePrefixMock).toHaveBeenCalledWith("uploads/s3-old");
     expect(deletePrefixMock).not.toHaveBeenCalledWith("uploads/s3-new");
+  });
+});
+
+// -- in-flight jobs (#1412) ---------------------------------------------------
+
+describe("storageTtlSweep keeps dirs of in-flight jobs (#1412)", () => {
+  it("maps a dir to its own job plus the pipeline or batch it belongs to", async () => {
+    const { owningJobIds } = await loadSystemJobs();
+    expect(owningJobIds("abc")).toEqual(["abc"]);
+    // Pipeline step output: <pipelineId>-s<i>.
+    expect(owningJobIds("pipe-s2")).toEqual(["pipe-s2", "pipe"]);
+    // Batch child (or per-file pipeline flow): <parentId>-f<i>.
+    expect(owningJobIds("batch-f3")).toEqual(["batch-f3", "batch"]);
+    // Per-file pipeline step: <parentId>-f<i>-s<j>, owned by the flow and the batch.
+    expect(owningJobIds("batch-f1-s0")).toEqual(["batch-f1-s0", "batch-f1", "batch"]);
+    // UUID dashes are not step or file suffixes.
+    const uuid = "6f1c2d9e-8a4b-4c3d-9e2f-1a2b3c4d5e6f";
+    expect(owningJobIds(uuid)).toEqual([uuid]);
+  });
+
+  it("skips an expired dir while any owning job is queued or processing", async () => {
+    delete process.env.SENTRY_CRON_MONITORS;
+    const { SYSTEM_JOBS, runSystemJob } = await loadSystemJobs();
+
+    queueSelect("users", []);
+    queueSelect("teams", []);
+    queueSelect("jobs", []); // no deleteAfter jobs
+    // Active owners among the expired candidates.
+    queueSelect("jobs", [{ id: "live" }, { id: "pipe" }, { id: "batch" }]);
+    getMaxAgeMsMock.mockResolvedValue(3_600_000);
+
+    const old = Date.now() - 7_200_000;
+    listJobDirsMock.mockImplementation(async (prefix: "uploads" | "outputs") => {
+      if (prefix === "uploads") {
+        return [
+          { key: "uploads/live", size: 0, mtimeMs: old },
+          { key: "uploads/batch-f0-s0", size: 0, mtimeMs: old },
+          { key: "uploads/gone", size: 0, mtimeMs: old },
+        ];
+      }
+      return [{ key: "outputs/pipe-s0", size: 0, mtimeMs: old }];
+    });
+
+    const logSpy = loggerCalls("info");
+    const drizzle = await import("drizzle-orm");
+
+    const result = await runSystemJob({ name: SYSTEM_JOBS.storageTtl } as never);
+
+    expect(result).toEqual({ removed: 1, failed: 0 });
+    expect(deletePrefixMock).toHaveBeenCalledTimes(1);
+    expect(deletePrefixMock).toHaveBeenCalledWith("uploads/gone");
+    // In flight means queued or processing, and only rows job-reconciliation
+    // settles (any row with a tool id), so a stuck row cannot pin a dir. Since
+    // #1441 that includes gdpr-export's system rows.
+    expect(drizzle.inArray).toHaveBeenCalledWith("jobs.status", ["queued", "processing"]);
+    expect(drizzle.isNotNull).toHaveBeenCalledWith("jobs.toolId");
+    expect(drizzle.ne).toHaveBeenCalledWith("jobs.toolId", "");
+    expect(drizzle.ne).not.toHaveBeenCalledWith("jobs.type", "system");
+    expect(logSpy.mock.calls.map((c) => c[0])).toContain(
+      "Storage TTL: kept 3 expired job dirs whose jobs are still in flight",
+    );
+    logSpy.mockRestore();
+  });
+
+  it("keeps an S3 dir (no mtime) whose job is queued even though its row is past the cutoff", async () => {
+    // On S3, decideExpiry ages a queued row from createdAt, so the in-flight
+    // check is the only thing between a queued job and the loss of its input.
+    delete process.env.SENTRY_CRON_MONITORS;
+    const { SYSTEM_JOBS, runSystemJob } = await loadSystemJobs();
+
+    queueSelect("users", []);
+    queueSelect("teams", []);
+    queueSelect("jobs", []); // no deleteAfter jobs
+    const old = new Date(Date.now() - 7_200_000);
+    queueSelect("jobs", [{ id: "s3-q", createdAt: old, completedAt: null }]); // rowsById
+    queueSelect("jobs", [{ id: "s3-q" }]); // in flight
+    getMaxAgeMsMock.mockResolvedValue(3_600_000);
+    listJobDirsMock.mockImplementation(async (prefix: "uploads" | "outputs") =>
+      prefix === "uploads" ? [{ key: "uploads/s3-q", size: 0, mtimeMs: 0 }] : [],
+    );
+
+    const result = await runSystemJob({ name: SYSTEM_JOBS.storageTtl } as never);
+
+    expect(result).toEqual({ removed: 0, failed: 0 });
+    expect(deletePrefixMock).not.toHaveBeenCalled();
+  });
+
+  it("does not look up owners when nothing has expired", async () => {
+    delete process.env.SENTRY_CRON_MONITORS;
+    const { SYSTEM_JOBS, runSystemJob } = await loadSystemJobs();
+
+    queueSelect("users", []);
+    queueSelect("teams", []);
+    queueSelect("jobs", []);
+    // Would make every dir look live if it were (wrongly) consumed.
+    queueSelect("jobs", [{ id: "fresh" }]);
+    getMaxAgeMsMock.mockResolvedValue(3_600_000);
+    listJobDirsMock.mockImplementation(async (prefix: "uploads" | "outputs") =>
+      prefix === "uploads" ? [{ key: "uploads/fresh", size: 0, mtimeMs: Date.now() }] : [],
+    );
+
+    await runSystemJob({ name: SYSTEM_JOBS.storageTtl } as never);
+
+    expect(deletePrefixMock).not.toHaveBeenCalled();
+    expect(selectQueues.jobs).toHaveLength(1);
+  });
+
+  it("restricts the deleteAfter sweep to finished jobs", async () => {
+    delete process.env.SENTRY_CRON_MONITORS;
+    const { SYSTEM_JOBS, runSystemJob } = await loadSystemJobs();
+    const drizzle = await import("drizzle-orm");
+
+    queueSelect("users", []);
+    queueSelect("teams", []);
+    queueSelect("jobs", []);
+    getMaxAgeMsMock.mockResolvedValue(0);
+
+    await runSystemJob({ name: SYSTEM_JOBS.storageTtl } as never);
+
+    expect(drizzle.inArray).toHaveBeenCalledWith("jobs.status", [
+      "completed",
+      "failed",
+      "canceled",
+    ]);
   });
 });

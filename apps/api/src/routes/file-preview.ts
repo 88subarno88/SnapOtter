@@ -49,7 +49,7 @@ function previewDirPath(): string {
  * be assumed dead. A limit of 0 means unlimited, so fall back to a day.
  */
 function staleAfterMs(): number {
-  const encodeS = env.JOB_TIMEOUT_LONG_S || 86_400;
+  const encodeS = env.PREVIEW_TIMEOUT_S || 86_400;
   const convertS = env.LIBREOFFICE_TIMEOUT_S || 120;
   return Math.max(encodeS, convertS) * 1000;
 }
@@ -98,11 +98,11 @@ export function ensurePreviewDir(): Promise<void> {
  * Remove cached preview files for a deleted user file (.mp4, .mp3, .pdf).
  */
 export async function deletePreview(fileId: string): Promise<void> {
+  // `force` already ignores a missing preview, so anything that still throws is
+  // a real failure. It reaches the caller, which fails the delete before any
+  // row goes, the same as a stored file that can't be removed (#1455).
   for (const ext of [".mp4", ".mp3", ".pdf"]) {
-    const path = previewPath(fileId, ext);
-    await rm(path, { force: true }).catch((err) => {
-      logger.warn({ err, fileId, path }, "Could not remove cached preview");
-    });
+    await rm(previewPath(fileId, ext), { force: true });
   }
 }
 
@@ -142,6 +142,65 @@ function previewErrorBody(err: unknown): { error: string; code?: string; encoder
     return { error: friendlyError(err.message), code: err.code, encoder };
   }
   return { error: "Could not generate preview" };
+}
+
+/**
+ * Time limit for one preview encode, so a hung ffmpeg can't hold a request for
+ * the two-hour media job limit to render a clip capped at a minute (#1406).
+ * PREVIEW_TIMEOUT_S, 0 = unlimited.
+ */
+function previewTimeoutMs(): number {
+  return env.PREVIEW_TIMEOUT_S * 1000;
+}
+
+/**
+ * A signal that fires when the client hangs up before the response ends
+ * (#1406). Only the on-demand preview uses it: its output is thrown away, while
+ * a stored-file preview lands in the cache, so finishing that one after a
+ * proxy gives up turns the retry into a cache hit. Call release() once the
+ * encode settles.
+ */
+function abortOnDisconnect(request: FastifyRequest, reply: FastifyReply) {
+  const abort = new AbortController();
+  const onClose = () => {
+    if (!reply.raw.writableEnded) abort.abort();
+  };
+  // A hangup while the upload was still being read has already fired "close".
+  if (reply.raw.destroyed || request.raw.socket?.destroyed) abort.abort();
+  else reply.raw.once("close", onClose);
+  return {
+    signal: abort.signal,
+    clientGone: () => abort.signal.aborted,
+    release: () => reply.raw.off("close", onClose),
+  };
+}
+
+/**
+ * A Node SystemError (it carries `syscall`) means the server couldn't run the
+ * conversion at all: a spawn that failed with EMFILE or ENOMEM, a directory it
+ * couldn't read. That is a server fault to report as a 500, not a document or
+ * media file the engine rejected. LibreOffice's own failures (a non-zero exit,
+ * no output, its timeout, the memory cap killing it) and ffmpeg's carry no
+ * `syscall` and stay a 422 (#1439).
+ */
+function isServerFault(err: unknown): boolean {
+  return typeof (err as { syscall?: unknown } | null)?.syscall === "string";
+}
+
+/** Log and report a preview failure that is the server's, not the file's. */
+function reportPreviewFault(
+  err: unknown,
+  request: FastifyRequest,
+  context: Record<string, unknown>,
+  message: string,
+): void {
+  request.log.error({ err, ...context }, message);
+  void reportError(err, {
+    source: "http",
+    route: request.routeOptions?.url ?? undefined,
+    method: request.method,
+    statusCode: 500,
+  });
 }
 
 /** Best-effort removal of an unfinished preview; logged, since nothing else clears it. */
@@ -248,32 +307,48 @@ export async function filePreviewRoutes(app: FastifyInstance): Promise<void> {
         let tempDir: string | undefined;
 
         try {
-          tempDir = await mkdtemp(join(previewDirPath(), `${id}-`));
-          const tempInput = join(tempDir, `input${origExt}`);
-          await copyFile(inputPath, tempInput);
+          // Staging touches only the server's own disk and stored file: a full
+          // disk, an unwritable preview dir, or a stored file gone from disk is
+          // a 500 worth reporting, not a document LibreOffice can't read (#1404).
+          let stagedDir: string;
+          let tempInput: string;
+          try {
+            stagedDir = await mkdtemp(join(previewDirPath(), `${id}-`));
+            tempDir = stagedDir;
+            tempInput = join(stagedDir, `input${origExt}`);
+            await copyFile(inputPath, tempInput);
+          } catch (stageErr) {
+            reportPreviewFault(
+              stageErr,
+              request,
+              { fileId: id },
+              "Document preview staging failed",
+            );
+            return reply.status(500).send({ error: "Could not prepare document preview" });
+          }
 
-          await convertDocument(tempInput, tempDir, "pdf", {
+          await convertDocument(tempInput, stagedDir, "pdf", {
             timeoutMs: (env.LIBREOFFICE_TIMEOUT_S || 120) * 1000,
           });
 
           // convertDocument outputs next to the temp file: input.pdf
-          const producedPath = join(tempDir, "input.pdf");
+          const producedPath = join(stagedDir, "input.pdf");
           try {
             await rename(producedPath, cachedPath);
           } catch (renameErr) {
-            request.log.error(
-              { err: renameErr, fileId: id, cachedPath },
+            reportPreviewFault(
+              renameErr,
+              request,
+              { fileId: id, cachedPath },
               "Document preview cache write failed",
             );
-            void reportError(renameErr, {
-              source: "http",
-              route: "/api/v1/files/:id/preview",
-              method: "GET",
-              statusCode: 500,
-            });
             return reply.status(500).send({ error: "Could not store preview" });
           }
         } catch (err) {
+          if (isServerFault(err)) {
+            reportPreviewFault(err, request, { fileId: id }, "Document preview could not run");
+            return reply.status(500).send({ error: "Could not generate document preview" });
+          }
           request.log.error({ err, fileId: id }, "Document preview generation failed");
           return reply.status(422).send({ error: "Could not generate document preview" });
         } finally {
@@ -308,6 +383,14 @@ export async function filePreviewRoutes(app: FastifyInstance): Promise<void> {
       // ends in the real extension because ffmpeg picks the container from it.
       await ensurePreviewDir();
       const inputPath = getStoredFilePath(file.storedName);
+      // ffmpeg reports a missing input as a failed encode, which reads as a bad
+      // upload. A stored file gone from disk is the server's fault (#1439).
+      try {
+        await access(inputPath);
+      } catch (err) {
+        reportPreviewFault(err, request, { fileId: id }, "Preview source file missing");
+        return reply.status(500).send({ error: "Could not prepare preview" });
+      }
       const partialPath = resolveWithinPreviewDir(`${id}.${randomUUID()}.part${previewExt}`);
 
       try {
@@ -335,7 +418,7 @@ export async function filePreviewRoutes(app: FastifyInstance): Promise<void> {
               "-y",
               partialPath,
             ],
-            { timeoutMs: env.JOB_TIMEOUT_LONG_S * 1000 },
+            { timeoutMs: previewTimeoutMs() },
           );
         } else {
           await runFfmpeg(
@@ -351,11 +434,15 @@ export async function filePreviewRoutes(app: FastifyInstance): Promise<void> {
               "-y",
               partialPath,
             ],
-            { timeoutMs: env.JOB_TIMEOUT_LONG_S * 1000 },
+            { timeoutMs: previewTimeoutMs() },
           );
         }
       } catch (err) {
         await removePartialPreview(partialPath, request.log);
+        if (isServerFault(err)) {
+          reportPreviewFault(err, request, { fileId: id }, "Preview encode could not run");
+          return reply.status(500).send({ error: "Could not generate preview" });
+        }
         request.log.error({ err, fileId: id }, "Preview generation failed");
         return reply.status(422).send(previewErrorBody(err));
       }
@@ -367,13 +454,7 @@ export async function filePreviewRoutes(app: FastifyInstance): Promise<void> {
         await rename(partialPath, cachedPath);
       } catch (err) {
         await removePartialPreview(partialPath, request.log);
-        request.log.error({ err, fileId: id, cachedPath }, "Preview cache write failed");
-        void reportError(err, {
-          source: "http",
-          route: "/api/v1/files/:id/preview",
-          method: "GET",
-          statusCode: 500,
-        });
+        reportPreviewFault(err, request, { fileId: id, cachedPath }, "Preview cache write failed");
         return reply.status(500).send({ error: "Could not store preview" });
       }
 
@@ -471,6 +552,8 @@ export async function filePreviewRoutes(app: FastifyInstance): Promise<void> {
       const inputPath = join(tmpdir(), `snapotter-preview-${id}.${ext}`);
       const outputExt = isVideo ? "mp4" : "mp3";
       const outputPath = join(tmpdir(), `snapotter-preview-${id}-out.${outputExt}`);
+      const disconnect = abortOnDisconnect(request, reply);
+      const encodeOptions = { timeoutMs: previewTimeoutMs(), signal: disconnect.signal };
 
       try {
         await writeFile(inputPath, fileBuffer);
@@ -499,7 +582,7 @@ export async function filePreviewRoutes(app: FastifyInstance): Promise<void> {
               "-y",
               outputPath,
             ],
-            { timeoutMs: env.JOB_TIMEOUT_LONG_S * 1000 },
+            encodeOptions,
           );
         } else {
           await runFfmpeg(
@@ -515,7 +598,7 @@ export async function filePreviewRoutes(app: FastifyInstance): Promise<void> {
               "-y",
               outputPath,
             ],
-            { timeoutMs: env.JOB_TIMEOUT_LONG_S * 1000 },
+            encodeOptions,
           );
         }
 
@@ -527,9 +610,19 @@ export async function filePreviewRoutes(app: FastifyInstance): Promise<void> {
           .header("Content-Length", outputBuffer.length)
           .send(outputBuffer);
       } catch (err) {
-        request.log.error({ err, filename }, "On-demand preview generation failed");
+        if (disconnect.clientGone()) {
+          request.log.info({ filename }, "On-demand preview stopped: client disconnected");
+        } else if (isServerFault(err)) {
+          // A temp write that failed, a spawn that couldn't start: the server's
+          // fault, not the uploaded file's (#1439).
+          reportPreviewFault(err, request, { filename }, "On-demand preview could not run");
+          return reply.status(500).send({ error: "Could not generate preview" });
+        } else {
+          request.log.error({ err, filename }, "On-demand preview generation failed");
+        }
         return reply.status(422).send(previewErrorBody(err));
       } finally {
+        disconnect.release();
         await rm(inputPath, { force: true }).catch(() => {});
         await rm(outputPath, { force: true }).catch(() => {});
       }

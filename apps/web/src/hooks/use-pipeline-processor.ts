@@ -1,8 +1,10 @@
 import { ANALYTICS_EVENTS } from "@snapotter/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "@/contexts/i18n-context";
 import { track } from "@/lib/analytics";
 import { formatHeaders, parseApiError } from "@/lib/api";
 import { appUrl, resolveServerUrls, serverUrl } from "@/lib/app-url";
+import { featureNotInstalledMessage } from "@/lib/bundle-i18n";
 import { FRAME_HANDLING_FAILED, type ProgressFrame } from "@/lib/progress-frames";
 import { generateId } from "@/lib/utils";
 import { useFileStore } from "@/stores/file-store";
@@ -56,6 +58,7 @@ const JOB_EVIDENCE_TIMEOUT_MS = 30_000;
  * result; the batch frame carries the durable ZIP's download URL).
  */
 export function usePipelineProcessor() {
+  const { t } = useTranslation();
   const {
     processing,
     error,
@@ -574,9 +577,7 @@ export function usePipelineProcessor() {
             } else {
               const parsed = parseApiError(body, xhr.status);
               if (typeof parsed === "object" && parsed.type === "feature_not_installed") {
-                setError(
-                  `The "${parsed.featureName}" feature is not installed. Enable it in Settings → AI Features.`,
-                );
+                setError(featureNotInstalledMessage(t, parsed));
               } else {
                 setError(parsed as string);
               }
@@ -641,6 +642,7 @@ export function usePipelineProcessor() {
       resetStallTimer,
       startJobEvidenceTimer,
       trackDegrade,
+      t,
     ],
   );
 
@@ -899,7 +901,11 @@ export function usePipelineProcessor() {
               failRun("Canceled");
               return;
             }
-            if (body.errors && Array.isArray(body.errors) && body.errors.length > 0) {
+            // A body with its own code (ENGINE_UNAVAILABLE when every file
+            // failed on a missing engine) carries the batch's reason and hint;
+            // the per-file list would hide the hint behind a count (#1432).
+            const coded = typeof body.code === "string" && body.code.length > 0;
+            if (!coded && body.errors && Array.isArray(body.errors) && body.errors.length > 0) {
               // Show the first file's step-level error (all files typically fail at the same step)
               const first = body.errors[0];
               errorMsg = first.error;
@@ -909,7 +915,7 @@ export function usePipelineProcessor() {
             } else {
               const parsed = parseApiError(body, xhr.status);
               if (typeof parsed === "object" && parsed.type === "feature_not_installed") {
-                errorMsg = `The "${parsed.featureName}" feature is not installed. Enable it in Settings → AI Features.`;
+                errorMsg = featureNotInstalledMessage(t, parsed);
               } else {
                 errorMsg = parsed as string;
               }
@@ -960,6 +966,7 @@ export function usePipelineProcessor() {
       resetStallTimer,
       startJobEvidenceTimer,
       trackDegrade,
+      t,
     ],
   );
 

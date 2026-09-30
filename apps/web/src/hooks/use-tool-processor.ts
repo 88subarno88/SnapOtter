@@ -1,6 +1,7 @@
 import {
   ANALYTICS_EVENTS,
   apiToolPath,
+  type FeedbackErrorCategory,
   FILE_NOTES_ALL_FILES,
   PYTHON_SIDECAR_TOOLS,
   TOOLS,
@@ -11,9 +12,15 @@ import { useTranslation } from "@/contexts/i18n-context";
 import { track } from "@/lib/analytics";
 import { formatHeaders, parseApiError } from "@/lib/api";
 import { appUrl, resolveServerUrls, serverUrl } from "@/lib/app-url";
-import { FRAME_HANDLING_FAILED, type ProgressFrame } from "@/lib/progress-frames";
+import { featureNotInstalledMessage } from "@/lib/bundle-i18n";
+import {
+  FRAME_HANDLING_FAILED,
+  failedFrameMessage,
+  type ProgressFrame,
+} from "@/lib/progress-frames";
 import { asNotesMap, parseFileNotesHeader, pickResultNotes } from "@/lib/result-notes";
 import { MULTI_FILE_TOOLS } from "@/lib/tool-display-modes";
+import { getToolName } from "@/lib/tool-i18n";
 import { generateId } from "@/lib/utils";
 import { useFileStore } from "@/stores/file-store";
 
@@ -150,7 +157,7 @@ export function useToolProcessor(toolId: string) {
   } | null>(null);
 
   const isAiTool = AI_PYTHON_TOOLS.has(toolId);
-  const toolName = TOOLS.find((t) => t.id === toolId)?.name ?? toolId;
+  const toolName = getToolName(t, toolId, TOOLS.find((tool) => tool.id === toolId)?.name ?? toolId);
 
   // Operator-visible record of a sync wait falling back to the async path:
   // the fallback masks the network failure from the user by design, so this
@@ -483,7 +490,7 @@ export function useToolProcessor(toolId: string) {
               // cannot replace this specific error with a generic one.
               xhrRef.current?.abort();
               clearActiveJob();
-              const message = data.error || "Processing failed";
+              const message = failedFrameMessage(data, "Processing failed");
               settleProcessingEntries(message);
               setError(message);
               setProcessing(false);
@@ -702,11 +709,12 @@ export function useToolProcessor(toolId: string) {
       // status === "processing" and gates the failure screen on
       // status === "failed", so an unsettled entry pulses on the untouched
       // original forever (#799, the single-file twin of #798's failRun).
-      const failEntry = (message: string) => {
+      const failEntry = (message: string, category?: FeedbackErrorCategory) => {
         if (useFileStore.getState().entries[capturedIndex]?.status === "processing") {
           useFileStore.getState().updateEntry(capturedIndex, {
             status: "failed",
             error: message,
+            errorCategory: category ?? null,
           });
         }
       };
@@ -776,7 +784,7 @@ export function useToolProcessor(toolId: string) {
             const body = JSON.parse(xhr.responseText);
             const parsed = parseApiError(body, xhr.status);
             if (typeof parsed === "object" && parsed.type === "feature_not_installed") {
-              message = `${toolName} requires the "${parsed.featureName}" feature. Enable it in Settings → AI Features.`;
+              message = featureNotInstalledMessage(t, parsed, toolName);
             } else {
               message = parsed as string;
             }
@@ -787,7 +795,7 @@ export function useToolProcessor(toolId: string) {
           // the same thing to the user, in their language (#1341).
           if (xhr.status === 413) message = t.errors.fileTooLarge;
           setError(message);
-          failEntry(message);
+          failEntry(message, xhr.status === 413 ? "upload_error" : undefined);
         }
 
         setProcessing(false);
@@ -853,7 +861,7 @@ export function useToolProcessor(toolId: string) {
       startJobEvidenceTimer,
       trackDegrade,
       toolName,
-      t.errors.fileTooLarge,
+      t,
     ],
   );
 
@@ -965,7 +973,7 @@ export function useToolProcessor(toolId: string) {
         setProgress(IDLE_PROGRESS);
       };
 
-      const failRun = (message: string, reason: string) => {
+      const failRun = (message: string, reason: string, category?: FeedbackErrorCategory) => {
         // Entries were set to "processing" at kickoff (the reset loop above). A
         // whole-run failure that never reached settleFromZip must settle them,
         // or the result pane keeps pulsing on the stale original because the
@@ -973,7 +981,7 @@ export function useToolProcessor(toolId: string) {
         const runEntries = useFileStore.getState().entries;
         for (let i = 0; i < runEntries.length; i++) {
           if (runEntries[i]?.status === "processing") {
-            updateEntry(i, { status: "failed", error: message });
+            updateEntry(i, { status: "failed", error: message, errorCategory: category ?? null });
           }
         }
         setError(message);
@@ -1248,7 +1256,7 @@ export function useToolProcessor(toolId: string) {
             if (typeof code === "string" && code.length > 0) reason = code;
             const parsed = parseApiError(body, xhr.status);
             if (typeof parsed === "object" && parsed.type === "feature_not_installed") {
-              errorMsg = `${toolName} requires the "${parsed.featureName}" feature. Enable it in Settings → AI Features.`;
+              errorMsg = featureNotInstalledMessage(t, parsed, toolName);
             } else {
               errorMsg = parsed as string;
             }
@@ -1267,7 +1275,11 @@ export function useToolProcessor(toolId: string) {
           if (xhr.status === 413) errorMsg = t.errors.fileTooLarge;
           // "Canceled" (not the route's message) so the existing i18n
           // mapping renders it localized.
-          failRun(serverCanceled ? "Canceled" : errorMsg, reason);
+          failRun(
+            serverCanceled ? "Canceled" : errorMsg,
+            reason,
+            !serverCanceled && xhr.status === 413 ? "upload_error" : undefined,
+          );
         })();
       };
 
@@ -1306,7 +1318,7 @@ export function useToolProcessor(toolId: string) {
       startJobEvidenceTimer,
       trackDegrade,
       toolName,
-      t.errors.fileTooLarge,
+      t,
     ],
   );
 

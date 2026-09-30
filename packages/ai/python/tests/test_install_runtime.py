@@ -152,6 +152,15 @@ class InstallRuntimeTests(unittest.TestCase):
         self.root = Path(self.temporary_directory.name)
         self.fixture = RuntimeFixture(self.root)
         self.host = install_runtime.HostInfo(platform="linux", machine="x86_64")
+        # Installs would otherwise probe the real host's cgroup memory, which
+        # makes the suite depend on the host's cgroup layout and limits. The
+        # probe's own tests call the real function.
+        self._real_effective_memory_bytes = install_runtime._effective_memory_bytes
+        memory_probe = mock.patch.object(
+            install_runtime, "_effective_memory_bytes", return_value=64 * 1024**3
+        )
+        memory_probe.start()
+        self.addCleanup(memory_probe.stop)
 
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
@@ -529,6 +538,28 @@ class InstallRuntimeTests(unittest.TestCase):
         generation_root = v3_root / "runtimes" / FAMILY / TARGET / "1.0.0-abc123"
         self.assertEqual(stat.S_IMODE(generation_root.stat().st_mode), 0o755)
 
+    def _assert_install_keeps_signed_modes_under_umask(self, umask: int) -> None:
+        # The installer must give every extracted file its signed mode itself.
+        # Under the default 022 an inherited mode happens to match, so only a
+        # tighter umask catches a regression here (#1563).
+        previous = os.umask(umask)
+        try:
+            result = self._install()
+        finally:
+            os.umask(previous)
+
+        for relative_path, (_contents, mode) in self.fixture.files.items():
+            with self.subTest(path=relative_path):
+                info = (result.generation_root / relative_path).lstat()
+                self.assertEqual(stat.S_IMODE(info.st_mode), mode)
+
+    def test_install_keeps_signed_modes_under_the_container_umask(self) -> None:
+        # docker/entrypoint.sh runs the app under umask 0007.
+        self._assert_install_keeps_signed_modes_under_umask(0o007)
+
+    def test_install_keeps_signed_modes_under_an_owner_only_umask(self) -> None:
+        self._assert_install_keeps_signed_modes_under_umask(0o077)
+
     def test_target_preflight_fails_before_creating_v3_state(self) -> None:
         artifact = self.fixture.artifact()
         artifact["target"] = "linux-arm64-cpu-py311"
@@ -600,7 +631,7 @@ class InstallRuntimeTests(unittest.TestCase):
         with mock.patch.object(os, "sysconf", side_effect=[8 * gib, 1]), mock.patch.object(
             Path, "read_text", new=read_from(private_files)
         ):
-            self.assertEqual(install_runtime._effective_memory_bytes(), 6 * gib)
+            self.assertEqual(self._real_effective_memory_bytes(), 6 * gib)
 
         host_files = {
             "/proc/self/cgroup": "0::/system.slice/docker-deadbeef.scope\n",
@@ -612,12 +643,120 @@ class InstallRuntimeTests(unittest.TestCase):
                 6 * gib
             ),
             "/sys/fs/cgroup/system.slice/memory.max": str(5 * gib),
-            "/sys/fs/cgroup/memory.max": "max\n",
+            # The v2 root never has memory.max, only cgroup.controllers.
+            "/sys/fs/cgroup/cgroup.controllers": "cpuset cpu io memory pids\n",
         }
         with mock.patch.object(os, "sysconf", side_effect=[8 * gib, 1]), mock.patch.object(
             Path, "read_text", new=read_from(host_files)
         ):
-            self.assertEqual(install_runtime._effective_memory_bytes(), 5 * gib)
+            self.assertEqual(self._real_effective_memory_bytes(), 5 * gib)
+
+    def test_effective_memory_treats_levels_without_the_memory_controller_as_unlimited(
+        self,
+    ) -> None:
+        # Raspberry Pi OS boots with cgroup_disable=memory: no level has
+        # memory.max, every level still has cgroup.controllers. The API's
+        # probe (packages/ai/src/runtime-resources.ts) reads that as no limit
+        # and so must the installer, or the two disagree (#1672).
+        gib = 1024 * 1024 * 1024
+        scope = "/sys/fs/cgroup/user.slice/user-1000.slice/session-1.scope"
+        files = {
+            "/proc/self/cgroup": "0::/user.slice/user-1000.slice/session-1.scope\n",
+            "/proc/self/mountinfo": (
+                "29 23 0:26 / /sys/fs/cgroup rw,nosuid,nodev,noexec,relatime "
+                "- cgroup2 cgroup rw\n"
+            ),
+            f"{scope}/cgroup.controllers": "cpuset cpu io pids\n",
+            "/sys/fs/cgroup/user.slice/user-1000.slice/cgroup.controllers": (
+                "cpuset cpu io pids\n"
+            ),
+            "/sys/fs/cgroup/user.slice/cgroup.controllers": "cpuset cpu io pids\n",
+            "/sys/fs/cgroup/cgroup.controllers": "cpuset cpu io pids\n",
+        }
+
+        def read_text(path, *args, **kwargs):
+            value = files.get(str(path))
+            if value is None:
+                raise FileNotFoundError(path)
+            return value
+
+        with mock.patch.object(os, "sysconf", side_effect=[8 * gib, 1]), mock.patch.object(
+            Path, "read_text", new=read_text
+        ):
+            self.assertEqual(self._real_effective_memory_bytes(), 8 * gib)
+
+        # A limit below a level without the controller still applies.
+        files[f"{scope}/memory.max"] = str(3 * gib)
+        with mock.patch.object(os, "sysconf", side_effect=[8 * gib, 1]), mock.patch.object(
+            Path, "read_text", new=read_text
+        ):
+            self.assertEqual(self._real_effective_memory_bytes(), 3 * gib)
+
+    def test_effective_memory_fails_closed_when_a_missing_limit_has_no_controllers_file(
+        self,
+    ) -> None:
+        # A missing memory.max only means "no controller here" when the level
+        # itself is readable; otherwise the cgroup is gone or hidden.
+        gib = 1024 * 1024 * 1024
+        cases = {
+            "private namespace root": {
+                "/proc/self/cgroup": "0::/\n",
+                "/proc/self/mountinfo": (
+                    "29 23 0:26 / /sys/fs/cgroup rw,nosuid,nodev,noexec,relatime "
+                    "- cgroup2 cgroup rw\n"
+                ),
+            },
+            "cgroup v1 mount point": {
+                "/proc/self/cgroup": "5:memory:/\n",
+                "/proc/self/mountinfo": (
+                    "30 23 0:27 / /sys/fs/cgroup/memory rw,nosuid,nodev,noexec,relatime "
+                    "- cgroup cgroup rw,memory\n"
+                ),
+                # v1 has no cgroup.controllers fallback: this must not rescue it.
+                "/sys/fs/cgroup/memory/cgroup.controllers": "memory\n",
+            },
+        }
+        for label, files in cases.items():
+            def read_text(path, *args, _files=files, **kwargs):
+                value = _files.get(str(path))
+                if value is None:
+                    raise FileNotFoundError(path)
+                return value
+
+            with self.subTest(label), mock.patch.object(
+                os, "sysconf", side_effect=[8 * gib, 1]
+            ), mock.patch.object(Path, "read_text", new=read_text):
+                with self.assertRaisesRegex(install_runtime.PreflightError, "cgroup memory"):
+                    self._real_effective_memory_bytes()
+
+    def test_effective_memory_fails_closed_when_a_non_root_level_has_neither_file(
+        self,
+    ) -> None:
+        # Only system.slice is broken: no memory.max and no cgroup.controllers.
+        gib = 1024 * 1024 * 1024
+        files = {
+            "/proc/self/cgroup": "0::/system.slice/docker-deadbeef.scope\n",
+            "/proc/self/mountinfo": (
+                "29 23 0:26 / /sys/fs/cgroup rw,nosuid,nodev,noexec,relatime "
+                "- cgroup2 cgroup rw\n"
+            ),
+            "/sys/fs/cgroup/system.slice/docker-deadbeef.scope/memory.max": str(
+                6 * gib
+            ),
+            "/sys/fs/cgroup/cgroup.controllers": "cpuset cpu io memory pids\n",
+        }
+
+        def read_text(path, *args, **kwargs):
+            value = files.get(str(path))
+            if value is None:
+                raise FileNotFoundError(path)
+            return value
+
+        with mock.patch.object(os, "sysconf", side_effect=[8 * gib, 1]), mock.patch.object(
+            Path, "read_text", new=read_text
+        ):
+            with self.assertRaisesRegex(install_runtime.PreflightError, "cgroup memory"):
+                self._real_effective_memory_bytes()
 
     def test_effective_memory_fails_closed_for_unreadable_identified_controller(
         self,
@@ -641,7 +780,7 @@ class InstallRuntimeTests(unittest.TestCase):
             Path, "read_text", new=read_text
         ):
             with self.assertRaisesRegex(install_runtime.PreflightError, "cgroup memory"):
-                install_runtime._effective_memory_bytes()
+                self._real_effective_memory_bytes()
 
     def test_effective_memory_fails_closed_when_mount_metadata_is_unreadable(
         self,
@@ -657,7 +796,7 @@ class InstallRuntimeTests(unittest.TestCase):
             Path, "read_text", new=read_text
         ):
             with self.assertRaisesRegex(install_runtime.PreflightError, "cgroup memory"):
-                install_runtime._effective_memory_bytes()
+                self._real_effective_memory_bytes()
 
     def test_effective_memory_fails_closed_when_linux_membership_is_unavailable(
         self,
@@ -677,7 +816,7 @@ class InstallRuntimeTests(unittest.TestCase):
                 with self.assertRaisesRegex(
                     install_runtime.PreflightError, "cgroup memory"
                 ):
-                    install_runtime._effective_memory_bytes()
+                    self._real_effective_memory_bytes()
 
     def test_model_digests_must_bind_to_files_in_the_exact_manifest(self) -> None:
         artifact = self.fixture.artifact()

@@ -1,5 +1,5 @@
 // biome-ignore-all lint/suspicious/noTemplateCurlyInString: These contract assertions intentionally match GitHub and shell interpolation syntax as literal text.
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -8,6 +8,19 @@ import { load } from "js-yaml";
 import { describe, expect, it } from "vitest";
 
 const root = process.cwd();
+
+/**
+ * The release workflow's shell steps assume GitHub's Ubuntu runners: bash 4 or
+ * later (they use `mapfile`), `jq` and `sha256sum`. A dev machine or fleet host
+ * may lack one (dell has no jq; mac_air's only bash is 3.2), and the harness
+ * would then read the step's exit code as the workflow's own verdict (#1456).
+ * Off CI the harness skips, saying why; in CI a missing tool fails by name.
+ */
+const releaseShellReady =
+  spawnSync("bash", ["-c", "type mapfile && command -v jq && command -v sha256sum"], {
+    stdio: "ignore",
+  }).status === 0;
+const inCI = process.env.CI === "true";
 const bundlesWorkflowPath = path.resolve(root, ".github/workflows/ai-bundles.yml");
 const ciWorkflowPath = path.resolve(root, ".github/workflows/ci.yml");
 const releaseWorkflowPath = path.resolve(root, ".github/workflows/release.yml");
@@ -727,6 +740,48 @@ describe("OCR v3 bundle release workflow", () => {
     expect(publishJob).toContain('"files": files');
   });
 
+  it("refuses to sign an index carrying a float or an unsafe integer (#1415)", () => {
+    const workflow = readRequired(bundlesWorkflowPath);
+    const signJob = job(workflow, "sign-ocr-index", "verify-signed-ocr-index");
+    const beginMarker = "# OCR_CANONICAL_NUMBER_CONTRACT_BEGIN";
+    const endMarker = "# OCR_CANONICAL_NUMBER_CONTRACT_END";
+    const begin = signJob.indexOf(beginMarker);
+    const end = signJob.indexOf(endMarker, begin + beginMarker.length);
+    expect(begin, "canonical-number contract start marker is missing").toBeGreaterThanOrEqual(0);
+    expect(end, "canonical-number contract end marker is missing").toBeGreaterThan(begin);
+    const contract = signJob
+      .slice(begin + beginMarker.length, end)
+      .split("\n")
+      .map((line) => line.replace(/^ {10}/, ""))
+      .join("\n")
+      .trim();
+    const python = `${contract}\n\nimport json\nimport sys\nrequire_canonical_numbers(json.loads(sys.argv[1]))\n`;
+    const check = (indexJson: string) =>
+      execFileSync("python3", ["-c", python, indexJson], { stdio: "pipe" });
+
+    // The contract must run, uncommented, on the index before its canonical
+    // bytes are written.
+    const call = signJob.search(/^ {10}require_canonical_numbers\(index\)$/m);
+    expect(call).toBeGreaterThan(end);
+    expect(call).toBeLessThan(signJob.indexOf('"ocr-runtime-index.unsigned.json").write_bytes'));
+
+    expect(() =>
+      check('{"a":1,"b":[true,null,"x"],"c":{"d":-9007199254740991,"e":9007199254740991}}'),
+    ).not.toThrow();
+    for (const [bad, path] of [
+      ['{"a":1.0}', "index.a "],
+      ['{"a":[1e-07]}', "index.a[0] "],
+      ['{"a":{"b":-0.0}}', "index.a.b "],
+      ['{"a":9007199254740992}', "index.a "],
+      ['{"a":[{"b":-9007199254740992}]}', "index.a[0].b "],
+      // Offenders after the first member, so a loop that stops early fails.
+      ['{"a":1,"z":1.5}', "index.z "],
+      ['{"a":[1,2,3.5]}', "index.a[2] "],
+    ]) {
+      expect(() => check(bad), bad).toThrow(`value ${path}must be an integer`);
+    }
+  });
+
   it("rejects signed artifacts whose measured sizes drift beyond the release tolerance", () => {
     const workflow = readRequired(bundlesWorkflowPath);
     const signJob = job(workflow, "sign-ocr-index", "verify-signed-ocr-index");
@@ -1003,11 +1058,18 @@ describe("OCR v3 bundle release workflow", () => {
     expect(dockerJob).not.toContain("repair-${VERSION}");
   });
 
-  it("revalidates exact release provenance before tag or checkpoint digest reuse", () => {
+  it("revalidates exact release provenance before tag or checkpoint digest reuse", (ctx) => {
     // Drives a bash harness (temp scripts, a fake docker CLI, .docker.log
     // fixtures) that the slimmed Docker Container E2E image can't reproduce;
     // validated in PR CI instead. `/.dockerenv` marks a container runtime.
-    if (existsSync("/.dockerenv")) return;
+    ctx.skip(existsSync("/.dockerenv"), "the Docker test image can't run this harness; PR CI does");
+    ctx.skip(
+      !releaseShellReady && !inCI,
+      "needs bash 4+, jq and sha256sum, as on GitHub's runners",
+    );
+    expect(releaseShellReady, "CI must provide bash 4+, jq and sha256sum for this harness").toBe(
+      true,
+    );
     const dockerJob = job(readRequired(releaseWorkflowPath), "docker", "scan");
     const stepName = "Reuse an existing published platform digest";
     const stepStart = dockerJob.indexOf(`      - name: ${stepName}\n`);

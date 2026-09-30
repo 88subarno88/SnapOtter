@@ -1,9 +1,16 @@
+import type { FastifyBaseLogger } from "fastify";
 import sharp from "sharp";
 import { autoOrient } from "../lib/auto-orient.js";
 import { stripInternalPaths } from "../lib/errors.js";
 import { validateImageBuffer } from "../lib/file-validation.js";
-import { decodeAnyFormat, decodeToSharpCompat, needsCliDecode } from "../lib/format-decoders.js";
+import {
+  decodeAnyFormat,
+  decodeToSharpCompat,
+  isDecoderUnavailable,
+  needsCliDecode,
+} from "../lib/format-decoders.js";
 import { decodeHeic } from "../lib/heic-converter.js";
+import { logger } from "../lib/logger.js";
 import { decompressSvgz, sanitizeSvg } from "../lib/svg-sanitize.js";
 import { type InputHandler, InputValidationError, type PreparedInput } from "./contract.js";
 
@@ -21,6 +28,7 @@ export class ImageInputHandler implements InputHandler {
       maxDimension?: number;
       maxPixels?: number;
       signal?: AbortSignal;
+      log?: FastifyBaseLogger;
     },
   ): Promise<PreparedInput> {
     let fileBuffer = raw;
@@ -54,6 +62,7 @@ export class ImageInputHandler implements InputHandler {
         if (isPixelSafetyError(err)) {
           throw new InputValidationError(err instanceof Error ? err.message : String(err));
         }
+        if (isDecoderUnavailable(err)) throw engineUnavailable(err);
         throw new InputValidationError(
           "Failed to decode HEIC file. Ensure libheif-examples is installed.",
           422,
@@ -86,6 +95,9 @@ export class ImageInputHandler implements InputHandler {
         try {
           await boundedSharp(fileBuffer, opts.maxPixels).metadata();
         } catch (err) {
+          // Sharp reads some of these formats itself (DNG is a TIFF), so a
+          // missing CLI decoder only matters once that fallback fails too.
+          if (isDecoderUnavailable(decodeErr)) throw engineUnavailable(decodeErr);
           throw new InputValidationError(
             `Failed to decode ${validation.format.toUpperCase()} file`,
             422,
@@ -117,7 +129,18 @@ export class ImageInputHandler implements InputHandler {
       try {
         opts.signal?.throwIfAborted();
         await boundedSharp(fileBuffer, opts.maxPixels).resize(1).raw().toBuffer();
-      } catch {
+      } catch (probeErr) {
+        opts.signal?.throwIfAborted();
+        // The safety cap tripping is not a decoder gap: answer 400 like the
+        // HEIC and CLI branches do, and don't hand the file to ImageMagick.
+        if (isPixelSafetyError(probeErr)) throw new InputValidationError(errorMessage(probeErr));
+        // Say why the native decode was refused before trying the CLI decoder:
+        // a successful fallback is otherwise a silent re-encode, and a double
+        // failure would lose Sharp's reason (#1548).
+        (opts.log ?? logger).info(
+          { err: probeErr, format: "avif" },
+          "image-input: native AVIF decode failed, trying the CLI decoder",
+        );
         try {
           opts.signal?.throwIfAborted();
           fileBuffer = await decodeAnyFormat(fileBuffer, "avif", {
@@ -129,11 +152,18 @@ export class ImageInputHandler implements InputHandler {
           const ext = name.match(/\.[^.]+$/)?.[0];
           if (ext) name = `${name.slice(0, -ext.length)}.png`;
         } catch (fallbackErr) {
+          opts.signal?.throwIfAborted();
+          if (isPixelSafetyError(fallbackErr)) {
+            throw new InputValidationError(errorMessage(fallbackErr));
+          }
+          if (isDecoderUnavailable(fallbackErr)) throw engineUnavailable(fallbackErr);
+          // execFile's message ends with the tool's stderr, newline included,
+          // so trim before joining or the second reason starts its own line.
           throw new InputValidationError(
             "Failed to decode AVIF file",
             422,
             stripInternalPaths(
-              fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr),
+              `${errorMessage(fallbackErr).trim()}; native decode: ${errorMessage(probeErr)}`,
             ),
           );
         }
@@ -162,7 +192,7 @@ export class ImageInputHandler implements InputHandler {
     // the EXIF orientation tag so the worker sees upright pixels.
     if (!isSvg) {
       opts.signal?.throwIfAborted();
-      fileBuffer = await autoOrient(fileBuffer);
+      fileBuffer = await autoOrient(fileBuffer, opts.log);
       opts.signal?.throwIfAborted();
     }
 
@@ -171,6 +201,24 @@ export class ImageInputHandler implements InputHandler {
       filename: name,
     };
   }
+}
+
+/**
+ * A missing decoder binary is the operator's container, not the caller's
+ * file. As a 503 ENGINE_UNAVAILABLE the factory logs and reports it, the same
+ * contract the media and document handlers use, instead of a 422 that blames
+ * the upload (#1428). The decoder's spawn error rides along as `cause`: its
+ * path and errno are the only record of which binary failed and why.
+ */
+export function engineUnavailable(err: unknown): InputValidationError {
+  const converted = new InputValidationError(
+    err instanceof Error ? err.message : String(err),
+    503,
+    undefined,
+    "ENGINE_UNAVAILABLE",
+  );
+  converted.cause = err;
+  return converted;
 }
 
 function boundedSharp(buffer: Buffer, maxPixels?: number) {
@@ -200,6 +248,10 @@ function assertWithinImageLimits(
       `Image exceeds the ${formatPixelLimit(maxPixels)} pixel safety limit (${width}x${height})`,
     );
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 export function isPixelSafetyError(error: unknown): boolean {

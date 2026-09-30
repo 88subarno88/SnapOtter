@@ -15,9 +15,11 @@ import { env } from "../config.js";
 import { db, schema } from "../db/index.js";
 import { analyticsEnabled } from "../lib/analytics-gate.js";
 import { getMaxAgeMs } from "../lib/cleanup.js";
+import { logger } from "../lib/logger.js";
 import { deletePrefix, listJobDirs, type ObjectInfo } from "../lib/object-storage.js";
 import { getSettingNumber } from "../lib/settings-helpers.js";
 import { runAuditArchive } from "./audit-archive.js";
+import { reconcilableJobRows } from "./job-reconciliation.js";
 import { getQueue } from "./queues.js";
 import { runSiemForward } from "./siem-forward.js";
 
@@ -234,6 +236,32 @@ export function decideExpiry(
   return ageMs < cutoffMs ? "expired" : "keep";
 }
 
+/**
+ * The job rows whose liveness keeps a storage dir: the dir's own job, plus the
+ * pipeline or batch it belongs to. Pipeline steps are `<pipelineId>-s<i>` and
+ * the next step reads a finished step's output, so the pipeline row is what
+ * says it is still needed. Batch children and per-file pipeline flows are
+ * `<parentId>-f<i>`, per-file steps `<parentId>-f<i>-s<j>`.
+ */
+export function owningJobIds(dirJobId: string): string[] {
+  const ids = new Set([
+    dirJobId,
+    dirJobId.replace(/-s\d+$/, ""),
+    dirJobId.replace(/-f\d+(?:-s\d+)?$/, ""),
+  ]);
+  return [...ids];
+}
+
+const FINISHED_STATUSES = ["completed", "failed", "canceled"] as const;
+const SWEEP_ERRORS_LOGGED = 20;
+
+/** A store-wide fault fails every dir, every sweep, so list only the first few. */
+function listSweepErrors(errors: string[]): string {
+  const shown = errors.slice(0, SWEEP_ERRORS_LOGGED);
+  const more = errors.length - shown.length;
+  return `${shown.join("\n")}${more > 0 ? `\n...and ${more} more` : ""}`;
+}
+
 async function storageTtlSweep(): Promise<{ removed: number; failed: number }> {
   // Build set of user IDs under legal hold (direct or via team) once per sweep
   const heldUserRows = await db
@@ -260,42 +288,69 @@ async function storageTtlSweep(): Promise<{ removed: number; failed: number }> {
   }
 
   // --- Per-job deleteAfter sweep (team retention overrides) ---
-  // Runs regardless of the global TTL; deleteAfter is an absolute deadline.
+  // Runs regardless of the global TTL; deleteAfter is an absolute deadline,
+  // but only for a finished job: one still queued or running needs its input
+  // (#1412), and the next sweep after it finishes honors the deadline.
   let deleteAfterCleaned = 0;
+  // A failed deadline deletion is a retention promise not kept, so it is
+  // counted and logged like the global sweep's failures, never dropped (#1442).
+  const deleteAfterErrors: string[] = [];
   try {
     const expiredJobs = await db
       .select({ id: schema.jobs.id, userId: schema.jobs.userId })
       .from(schema.jobs)
-      .where(and(isNotNull(schema.jobs.deleteAfter), lt(schema.jobs.deleteAfter, new Date())));
+      .where(
+        and(
+          isNotNull(schema.jobs.deleteAfter),
+          lt(schema.jobs.deleteAfter, new Date()),
+          inArray(schema.jobs.status, [...FINISHED_STATUSES]),
+        ),
+      );
 
     for (const job of expiredJobs) {
       // Skip jobs belonging to users under legal hold
       if (job.userId && heldUserIds.has(job.userId)) continue;
-      try {
-        await deletePrefix(`uploads/${job.id}`);
-        await deletePrefix(`outputs/${job.id}`);
-        deleteAfterCleaned++;
-      } catch {
-        // Directory may not exist
+      // deletePrefix already tolerates a missing dir, so anything thrown here
+      // is a real fault. Each prefix is tried on its own, so a failed uploads/
+      // delete doesn't also leave outputs/ behind.
+      let cleaned = true;
+      for (const prefix of [`uploads/${job.id}`, `outputs/${job.id}`]) {
+        try {
+          await deletePrefix(prefix);
+        } catch (err) {
+          cleaned = false;
+          const message = err instanceof Error ? err.message : String(err);
+          deleteAfterErrors.push(`${prefix}: ${message}`);
+        }
       }
+      if (cleaned) deleteAfterCleaned++;
     }
 
     if (deleteAfterCleaned > 0) {
-      console.log(`Storage TTL: cleaned up ${deleteAfterCleaned} jobs by deleteAfter`);
+      logger.info(`Storage TTL: cleaned up ${deleteAfterCleaned} jobs by deleteAfter`);
     }
-  } catch {
-    // deleteAfter sweep is best-effort
+  } catch (err) {
+    // Best-effort: the global sweep below still runs, but say why the
+    // deadline sweep didn't. The whole error goes to the log, not its message:
+    // drizzle's DrizzleQueryError message is only the SQL, and the reason (a
+    // dropped connection, a missing column) is on its cause.
+    logger.error({ err }, "Storage TTL: deleteAfter sweep failed");
+  }
+  if (deleteAfterErrors.length > 0) {
+    logger.error(
+      `Storage TTL: ${deleteAfterErrors.length} deleteAfter dir(s) failed to delete:\n${listSweepErrors(deleteAfterErrors)}`,
+    );
   }
 
   // --- Global TTL sweep ---
   const maxAgeMs = await getMaxAgeMs();
-  if (maxAgeMs <= 0) return { removed: deleteAfterCleaned, failed: 0 };
+  if (maxAgeMs <= 0) return { removed: deleteAfterCleaned, failed: deleteAfterErrors.length };
 
   const cutoffMs = Date.now() - maxAgeMs;
   const uploadDirs = await listJobDirs("uploads");
   const outputDirs = await listJobDirs("outputs");
   const allDirs = [...uploadDirs, ...outputDirs];
-  if (allDirs.length === 0) return { removed: 0, failed: 0 };
+  if (allDirs.length === 0) return { removed: 0, failed: deleteAfterErrors.length };
 
   // Batch-lookup job rows for dirs with unknown mtime (S3 backend)
   const unknownIds = [
@@ -329,31 +384,59 @@ async function storageTtlSweep(): Promise<{ removed: number; failed: number }> {
     }
   }
 
-  let removed = 0;
-  const errors: string[] = [];
-  for (const dir of allDirs) {
-    if (decideExpiry(dir, cutoffMs, rowsById) === "expired") {
-      // Skip deletion if the job's user is under legal hold
-      const jobId = dir.key.split("/")[1];
-      const userId = jobUserMap.get(jobId);
-      if (userId && heldUserIds.has(userId)) continue;
+  const expiredDirs = allDirs.filter((dir) => decideExpiry(dir, cutoffMs, rowsById) === "expired");
 
-      try {
-        await deletePrefix(dir.key);
-        removed++;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        errors.push(`${dir.key}: ${message}`);
-      }
+  // Age alone would delete the input of a job still waiting behind a backed-up
+  // queue, so an expired dir survives while any job that owns it is in flight
+  // (#1412). Only rows job-reconciliation settles count, through its own
+  // predicate: a stranded one goes terminal within a minute, so a stuck row
+  // cannot pin a dir forever. Selected by status, not by an id list, so a huge
+  // backlog of expired dirs cannot overflow the bind-parameter limit.
+  const inFlightIds = new Set<string>();
+  if (expiredDirs.length > 0) {
+    const rows = await db
+      .select({ id: schema.jobs.id })
+      .from(schema.jobs)
+      .where(reconcilableJobRows());
+    for (const r of rows) inFlightIds.add(r.id);
+  }
+
+  let removed = 0;
+  let kept = 0;
+  const errors: string[] = [];
+  for (const dir of expiredDirs) {
+    const jobId = dir.key.split("/")[1];
+    if (owningJobIds(jobId).some((id) => inFlightIds.has(id))) {
+      kept++;
+      continue;
+    }
+    // Skip deletion if the job's user is under legal hold
+    const userId = jobUserMap.get(jobId);
+    if (userId && heldUserIds.has(userId)) continue;
+
+    try {
+      await deletePrefix(dir.key);
+      removed++;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      errors.push(`${dir.key}: ${message}`);
     }
   }
   if (errors.length > 0) {
-    console.error(`Storage TTL: ${errors.length} dir(s) failed to delete:\n${errors.join("\n")}`);
+    logger.error(
+      `Storage TTL: ${errors.length} dir(s) failed to delete:\n${listSweepErrors(errors)}`,
+    );
   }
   if (removed > 0) {
-    console.log(`Storage TTL: removed ${removed} expired job dirs`);
+    logger.info(`Storage TTL: removed ${removed} expired job dirs`);
   }
-  return { removed: removed + deleteAfterCleaned, failed: errors.length };
+  if (kept > 0) {
+    logger.info(`Storage TTL: kept ${kept} expired job dirs whose jobs are still in flight`);
+  }
+  return {
+    removed: removed + deleteAfterCleaned,
+    failed: errors.length + deleteAfterErrors.length,
+  };
 }
 
 // -- Retention sweep ----------------------------------------------------------

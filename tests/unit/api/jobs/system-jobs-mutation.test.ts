@@ -24,6 +24,20 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+// The code under test logs through the API's pino logger (#1500); mock it,
+// since config.js is stubbed without LOG_DIR, and read the calls from it.
+const loggerMock = vi.hoisted(() => ({
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  debug: vi.fn(),
+}));
+
+function loggerCalls(level: "info" | "warn" | "error") {
+  loggerMock[level].mockClear();
+  return loggerMock[level];
+}
+
 // -- Hoisted seam mocks -------------------------------------------------------
 
 const getQueueMock = vi.hoisted(() => vi.fn());
@@ -159,6 +173,7 @@ async function loadSystemJobs(
     inArray: vi.fn(() => "inArray"),
     isNotNull: vi.fn(() => "isNotNull"),
     lt: vi.fn(() => "lt"),
+    ne: vi.fn(() => "ne"),
     // Capturing tagged-template mock: records the literal strings and the
     // interpolated values so SQL-text and window-arithmetic mutants are visible.
     sql: vi.fn((strings: readonly string[], ...values: unknown[]) => {
@@ -219,6 +234,10 @@ async function loadSystemJobs(
   vi.doMock("@sentry/node", () => ({
     withMonitor: withMonitorMock,
   }));
+
+  // restoreAllMocks() keeps a vi.fn()'s calls, so start each load with none.
+  for (const fn of Object.values(loggerMock)) fn.mockClear();
+  vi.doMock("../../../../apps/api/src/lib/logger.js", () => ({ logger: loggerMock }));
 
   return import("../../../../apps/api/src/jobs/system-jobs.js");
 }
@@ -553,7 +572,7 @@ describe("storageTtlSweep log-guard boundaries", () => {
   it("does NOT log the deleteAfter line when zero jobs were cleaned", async () => {
     // No expired deleteAfter jobs -> deleteAfterCleaned stays 0.
     delete process.env.SENTRY_CRON_MONITORS;
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const logSpy = loggerCalls("info");
     const { SYSTEM_JOBS, runSystemJob } = await loadSystemJobs();
     queueSelect("users", []);
     queueSelect("teams", []);
@@ -571,7 +590,7 @@ describe("storageTtlSweep log-guard boundaries", () => {
 
   it("does NOT log the removed line when nothing expired in the global sweep", async () => {
     delete process.env.SENTRY_CRON_MONITORS;
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const logSpy = loggerCalls("info");
     const { SYSTEM_JOBS, runSystemJob } = await loadSystemJobs();
     queueSelect("users", []);
     queueSelect("teams", []);
@@ -594,7 +613,7 @@ describe("storageTtlSweep log-guard boundaries", () => {
 
   it("does NOT log the error line when every deletion succeeds", async () => {
     delete process.env.SENTRY_CRON_MONITORS;
-    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const errSpy = loggerCalls("error");
     const { SYSTEM_JOBS, runSystemJob } = await loadSystemJobs();
     queueSelect("users", []);
     queueSelect("teams", []);
@@ -666,8 +685,10 @@ describe("storageTtlSweep legal-hold select gating", () => {
     const result = await runSystemJob({ name: SYSTEM_JOBS.storageTtl } as never);
 
     // Kills the `&&` -> `||` / `size >= 0` mutants (line 308): a truthy guard
-    // would run a 4th select (jobUserMap). Only 3 selects should occur.
-    expect(dbSelectMock).toHaveBeenCalledTimes(3);
+    // would run a 5th select (jobUserMap). Only 4 should occur: held users,
+    // held teams, deleteAfter jobs, and the in-flight owner lookup for the
+    // expired dir (#1412).
+    expect(dbSelectMock).toHaveBeenCalledTimes(4);
     // And the dir is still deleted (no hold in effect).
     expect(result).toEqual({ removed: 1, failed: 0 });
     expect(deletePrefixMock).toHaveBeenCalledWith("uploads/stale");

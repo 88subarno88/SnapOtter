@@ -22,6 +22,7 @@ import {
   vi,
 } from "vitest";
 import { db, schema } from "../../../apps/api/src/db/index.js";
+import { logger } from "../../../apps/api/src/lib/logger.js";
 import { InputValidationError } from "../../../apps/api/src/modality/contract.js";
 import { DocumentInputHandler } from "../../../apps/api/src/modality/document-input.js";
 import { MediaInputHandler } from "../../../apps/api/src/modality/media-input.js";
@@ -50,7 +51,7 @@ vi.mock("../../../apps/api/src/lib/engine-unavailable.js", async (importOriginal
   const actual =
     await importOriginal<typeof import("../../../apps/api/src/lib/engine-unavailable.js")>();
   mocks.reportEngineUnavailable.mockImplementation(actual.reportEngineUnavailable);
-  return { reportEngineUnavailable: mocks.reportEngineUnavailable };
+  return { ...actual, reportEngineUnavailable: mocks.reportEngineUnavailable };
 });
 
 vi.mock("../../../apps/api/src/modality/document-input.js", async (importOriginal) => {
@@ -153,8 +154,17 @@ describe("engine-unavailable 503s are reported, not just returned (#1403)", () =
       videoPart("b.mp4"),
       { name: "settings", content: "{}" },
     ]);
-    // The per-file failure behavior is unchanged; the report is additive.
-    expect(res.statusCode).toBeGreaterThanOrEqual(400);
+    // Every file failed on the same missing engine, so the batch says so
+    // instead of a generic 422, and each file keeps its code (#1432).
+    expect(res.statusCode, res.body).toBe(503);
+    const body = res.json() as {
+      code?: string;
+      details?: string;
+      errors: Array<{ filename: string; code?: string }>;
+    };
+    expect(body.code).toBe("ENGINE_UNAVAILABLE");
+    expect(body.details).toContain("FFPROBE_PATH");
+    expect(body.errors.map((e) => e.code)).toEqual(["ENGINE_UNAVAILABLE", "ENGINE_UNAVAILABLE"]);
     expect(engineReports("mute-video")).toHaveLength(1);
 
     await post("/api/v1/tools/video/mute-video/batch", [
@@ -188,7 +198,12 @@ describe("engine-unavailable 503s are reported, not just returned (#1403)", () =
         content: JSON.stringify({ steps: [{ toolId: "extract-audio", settings: {} }] }),
       },
     ]);
-    expect(res.statusCode).toBeGreaterThanOrEqual(400);
+    expect(res.statusCode, res.body).toBe(503);
+    expect(res.json()).toMatchObject({
+      code: "ENGINE_UNAVAILABLE",
+      details: expect.stringContaining("FFPROBE_PATH"),
+      errors: [{ code: "ENGINE_UNAVAILABLE" }, { code: "ENGINE_UNAVAILABLE" }],
+    });
     expect(engineReports("extract-audio")).toHaveLength(1);
   });
 
@@ -261,39 +276,66 @@ describe("engine-unavailable 503s are reported, not just returned (#1403)", () =
     }
   });
 
-  it("a 503 raised inside the worker keeps its code and details on the job row", async () => {
-    // The route's pre-validation passes; qpdf breaks before the worker runs.
-    mocks.pdfPassesLeft = 1;
-    const res = await post("/api/v1/tools/pdf/ocr-pdf", [
-      { name: "file", filename: "scan.pdf", contentType: "application/pdf", content: PDF },
-      { name: "settings", content: JSON.stringify({ quality: "fast", pages: "1" }) },
-    ]);
-    expect(res.statusCode).toBe(202);
-    const { jobId } = res.json() as { jobId: string };
-
-    let row: typeof schema.jobs.$inferSelect | undefined;
-    for (let i = 0; i < 150; i++) {
-      [row] = await db.select().from(schema.jobs).where(eq(schema.jobs.id, jobId));
-      if (row?.status === "failed") break;
-      await new Promise((r) => setTimeout(r, 200));
+  it("the single-file tool route answers every upload with the code, reporting once (#1407)", async () => {
+    const upload = () =>
+      post("/api/v1/tools/video/resize-video", [
+        videoPart("clip.mp4"),
+        { name: "settings", content: JSON.stringify({ width: 320 }) },
+      ]);
+    for (const res of [await upload(), await upload()]) {
+      expect(res.statusCode).toBe(503);
+      expect(res.json()).toMatchObject({ code: "ENGINE_UNAVAILABLE" });
     }
-    expect(row?.status).toBe("failed");
-    expect(row?.error).toMatchObject({
-      code: "ENGINE_UNAVAILABLE",
-      details: expect.stringContaining("QPDF_PATH"),
-    });
+    expect(
+      engineReports("resize-video"),
+      "a busy instance must not report per upload",
+    ).toHaveLength(1);
+  });
 
-    // A client reconnecting after the failure replays the same code and hint.
-    const replay = await app.inject({
-      method: "GET",
-      url: `/api/v1/jobs/${jobId}/progress`,
-      headers: { authorization: `Bearer ${token}` },
-    });
-    const frame = JSON.parse(replay.body.match(/data: (.+)/)?.[1] ?? "{}");
-    expect(frame).toMatchObject({
-      phase: "failed",
-      code: "ENGINE_UNAVAILABLE",
-      details: expect.stringContaining("QPDF_PATH"),
-    });
+  it("a 503 raised inside the worker keeps its code and details on the job row", async () => {
+    const errorSpy = vi.spyOn(logger, "error");
+    try {
+      // The route's pre-validation passes; qpdf breaks before the worker runs.
+      mocks.pdfPassesLeft = 1;
+      const res = await post("/api/v1/tools/pdf/ocr-pdf", [
+        { name: "file", filename: "scan.pdf", contentType: "application/pdf", content: PDF },
+        { name: "settings", content: JSON.stringify({ quality: "fast", pages: "1" }) },
+      ]);
+      expect(res.statusCode).toBe(202);
+      const { jobId } = res.json() as { jobId: string };
+
+      let row: typeof schema.jobs.$inferSelect | undefined;
+      for (let i = 0; i < 150; i++) {
+        [row] = await db.select().from(schema.jobs).where(eq(schema.jobs.id, jobId));
+        if (row?.status === "failed") break;
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      expect(row?.status).toBe("failed");
+      expect(row?.error).toMatchObject({
+        code: "ENGINE_UNAVAILABLE",
+        details: expect.stringContaining("QPDF_PATH"),
+      });
+
+      // The worker logs it as a fault instead of skipping it as bad input (#1330, #1407).
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ jobId, toolId: "ocr-pdf" }),
+        "tool job failed",
+      );
+
+      // A client reconnecting after the failure replays the same code and hint.
+      const replay = await app.inject({
+        method: "GET",
+        url: `/api/v1/jobs/${jobId}/progress`,
+        headers: { authorization: `Bearer ${token}` },
+      });
+      const frame = JSON.parse(replay.body.match(/data: (.+)/)?.[1] ?? "{}");
+      expect(frame).toMatchObject({
+        phase: "failed",
+        code: "ENGINE_UNAVAILABLE",
+        details: expect.stringContaining("QPDF_PATH"),
+      });
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });
